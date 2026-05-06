@@ -20,18 +20,20 @@ export async function POST(req: NextRequest) {
       max_tokens: 1500,
       messages: [{
         role: 'user',
-        content: `Extract the recipe from this webpage text and return ONLY valid JSON with this exact structure:
+        content: `Extract the recipe from this webpage text. Translate everything to Dutch. Convert all measurements to metric units (grams, ml, liter, etc.) — never use cups, oz, lb, fl oz, or Fahrenheit. Use Dutch unit names: gram, ml, liter, eetlepel, theelepel, etc. Convert Fahrenheit to Celsius.
+
+Return ONLY valid JSON with this exact structure:
 {
-  "title": "string",
-  "description": "string",
+  "title": "string (Dutch)",
+  "description": "string (Dutch)",
   "servings": number,
   "prep_time_minutes": number,
   "cook_time_minutes": number,
   "cuisine": "one of: Italiaans|Midden-Oosters|Aziatisch|Nederlands|Mexicaans|Frans|Amerikaans|null",
   "ingredient_type": "one of: vis|vlees|kip|vegetarisch|pasta|rijst|soep|salade|null",
   "diet_labels": ["vegetarisch"|"vegan"|"glutenvrij"],
-  "ingredients": [{"name": "string", "amount": "string", "unit": "string"}],
-  "steps": [{"order": number, "text": "string", "timer_minutes": number|null}]
+  "ingredients": [{"name": "string (Dutch)", "amount": "string", "unit": "string (Dutch metric)"}],
+  "steps": [{"order": number, "text": "string (Dutch)", "timer_minutes": number|null}]
 }
 
 Webpage text:
