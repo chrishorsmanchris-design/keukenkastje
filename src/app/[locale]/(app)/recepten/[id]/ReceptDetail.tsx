@@ -80,19 +80,20 @@ export default function ReceptDetail({ recipe }: { recipe: Recipe }) {
 
   return (
     <div className="pb-8">
-      <label className="relative block cursor-pointer group">
+      <div className="relative">
         {imageUrl ? (
           <img src={imageUrl} alt={recipe.title} className="w-full h-56 object-cover" />
         ) : (
           <div className="w-full h-40 bg-stone-100 flex items-center justify-center text-5xl">🍽️</div>
         )}
-        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
-          <span className="opacity-0 group-hover:opacity-100 text-white text-sm font-medium bg-black/50 px-3 py-1.5 rounded-full transition-opacity">
-            {uploadingPhoto ? 'Uploaden...' : '📷 Foto wijzigen'}
-          </span>
-        </div>
-        <input type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} />
-      </label>
+        <label className="absolute bottom-3 right-3 cursor-pointer">
+          <div className="bg-black/60 text-white text-xs font-medium px-3 py-1.5 rounded-full flex items-center gap-1.5">
+            <span>📷</span>
+            <span>{uploadingPhoto ? 'Uploaden...' : 'Foto wijzigen'}</span>
+          </div>
+          <input type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} />
+        </label>
+      </div>
 
       <div className="px-4 pt-4 space-y-5">
         <div className="flex items-start justify-between gap-2">
