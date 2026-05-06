@@ -18,7 +18,7 @@ export default function BottomNav() {
   const locale = pathname.split('/')[1]
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-stone-100 safe-area-pb">
+    <nav className="fixed bottom-0 left-0 right-0 bg-white dark:bg-stone-900 border-t border-stone-100 dark:border-stone-800 safe-area-pb">
       <div className="max-w-2xl mx-auto flex items-center justify-around px-2 py-2">
         {navItems.map(({ href, icon, key }) => {
           const fullHref = `/${locale}${href}`
