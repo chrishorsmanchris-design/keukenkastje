@@ -53,7 +53,7 @@ export default async function GeschiedenisPage({ params }: { params: Promise<{ l
             <p className="text-xs font-semibold text-stone-400 uppercase tracking-wide mb-3">{week}</p>
             <div className="space-y-2">
               {entries!.map((entry, i) => {
-                const recipe = entry.recipe as { id: string; title: string; image_url?: string; cuisine?: string } | null
+                const recipe = entry.recipe as unknown as { id: string; title: string; image_url?: string; cuisine?: string } | null
                 if (!recipe) return null
                 const d = new Date(entry.date)
                 const dayName = d.toLocaleDateString('nl-NL', { weekday: 'long' })
