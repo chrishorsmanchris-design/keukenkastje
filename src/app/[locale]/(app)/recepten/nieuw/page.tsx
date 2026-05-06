@@ -15,10 +15,13 @@ export default function NieuwReceptPage() {
   const [importUrl, setImportUrl] = useState('')
   const [importing, setImporting] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [pendingPhoto, setPendingPhoto] = useState<File | null>(null)
+  const [photoPreview, setPhotoPreview] = useState('')
   const [form, setForm] = useState({
     title: '', description: '', source_url: '', source_name: '',
     servings: 2, prep_time_minutes: 0, cook_time_minutes: 0,
     cuisine: '', ingredient_type: '', diet_labels: [] as string[],
+    image_url: '',
     ingredients: [{ name: '', amount: '', unit: '' }] as Ingredient[],
     steps: [{ order: 1, text: '', timer_minutes: undefined }] as Step[],
   })
@@ -33,10 +36,19 @@ export default function NieuwReceptPage() {
       })
       const { recipe, source_url } = await res.json()
       setForm(f => ({ ...f, ...recipe, source_url: source_url ?? importUrl }))
+      if (recipe.image_url) setPhotoPreview(recipe.image_url)
     } catch {
       alert('Import mislukt, probeer een andere URL.')
     }
     setImporting(false)
+  }
+
+  function handlePhotoSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setPendingPhoto(file)
+    setPhotoPreview(URL.createObjectURL(file))
+    setForm(f => ({ ...f, image_url: '' }))
   }
 
   async function handleSave() {
@@ -47,6 +59,12 @@ export default function NieuwReceptPage() {
       ...form,
       household_id: profile?.household_id,
     }).select().single()
+    if (!error && data && pendingPhoto) {
+      const fd = new FormData()
+      fd.append('file', pendingPhoto)
+      fd.append('recipeId', data.id)
+      await fetch('/api/recepten/upload-image', { method: 'POST', body: fd })
+    }
     setSaving(false)
     if (!error && data) router.push(`/${locale}/recepten/${data.id}`)
   }
@@ -94,6 +112,24 @@ export default function NieuwReceptPage() {
           </button>
         </div>
       </div>
+
+      {/* Photo */}
+      <label className="relative block cursor-pointer">
+        {photoPreview ? (
+          <img src={photoPreview} alt="" className="w-full h-48 object-cover rounded-2xl" />
+        ) : (
+          <div className="w-full h-32 bg-stone-100 rounded-2xl flex flex-col items-center justify-center gap-1 text-stone-400 hover:bg-stone-200 transition-colors">
+            <span className="text-2xl">📷</span>
+            <span className="text-xs">Foto toevoegen</span>
+          </div>
+        )}
+        {photoPreview && (
+          <div className="absolute inset-0 bg-black/0 hover:bg-black/20 rounded-2xl transition-colors flex items-center justify-center">
+            <span className="opacity-0 hover:opacity-100 text-white text-xs bg-black/50 px-3 py-1 rounded-full transition-opacity">📷 Wijzigen</span>
+          </div>
+        )}
+        <input type="file" accept="image/*" className="hidden" onChange={handlePhotoSelect} />
+      </label>
 
       {/* Title */}
       <div className="space-y-1">

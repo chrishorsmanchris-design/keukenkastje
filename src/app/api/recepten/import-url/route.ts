@@ -12,7 +12,9 @@ export async function POST(req: NextRequest) {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Keukenkastje/1.0)' },
     })
     const html = await res.text()
-    // Strip HTML tags for cleaner input
+    const ogImage = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)?.[1]
+      ?? html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i)?.[1]
+      ?? null
     const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 8000)
 
     const message = await anthropic.messages.create({
@@ -48,6 +50,7 @@ ${text}`,
     if (!jsonMatch) throw new Error('No JSON found')
 
     const recipe = JSON.parse(jsonMatch[0])
+    if (ogImage) recipe.image_url = ogImage
     return NextResponse.json({ recipe, source_url: url })
   } catch (e) {
     return NextResponse.json({ error: 'Import mislukt' }, { status: 500 })
