@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
+import AISuggestieWidget from './AISuggestieWidget'
 
 function getGreeting() {
   const hour = new Date().getHours()
@@ -27,6 +28,8 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
           ⚙️
         </Link>
       </div>
+
+      <AISuggestieWidget />
 
       <div className="grid grid-cols-2 gap-3">
         {[

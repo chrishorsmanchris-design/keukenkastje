@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { ShoppingItem } from '@/lib/types'
+import { predictExpiry } from '@/lib/expiry'
 
 const CATEGORIES = [
   'Groente & fruit', 'Vlees & vis', 'Zuivel & eieren', 'Brood & bakkerij',
@@ -28,6 +29,7 @@ function categorize(name: string): string {
 export default function BoodschappenClient({ initialItems }: { initialItems: ShoppingItem[] }) {
   const [items, setItems] = useState<ShoppingItem[]>(initialItems)
   const [newItem, setNewItem] = useState('')
+  const [search, setSearch] = useState('')
   const [adding, setAdding] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -80,19 +82,21 @@ export default function BoodschappenClient({ initialItems }: { initialItems: Sho
     // Add to pantry when checked (only food items)
     if (checked && item.category !== 'Persoonlijke verzorging' && item.category !== 'Overig') {
       const { data: profile } = await supabase.from('profiles').select('household_id').single()
-      const formData = new FormData()
-      formData.append('name', item.name)
-      const res = await fetch('/api/pantry/scan', { method: 'POST', body: formData })
-      const { expires_at } = await res.json()
       await supabase.from('pantry_items').insert({
         name: item.name,
         quantity: item.quantity ?? 1,
         unit: item.unit ?? 'stuks',
-        expires_at,
+        expires_at: predictExpiry(item.name),
         household_id: profile?.household_id,
       })
     }
   }
+
+  const deleteItem = useCallback(async (item: ShoppingItem) => {
+    setItems(prev => prev.filter(i => i.id !== item.id))
+    const supabase = createClient()
+    await supabase.from('shopping_items').delete().eq('id', item.id)
+  }, [])
 
   async function clearChecked() {
     const supabase = createClient()
@@ -102,8 +106,9 @@ export default function BoodschappenClient({ initialItems }: { initialItems: Sho
   }
 
   // Group by category, unchecked first
-  const unchecked = items.filter(i => !i.checked)
-  const checked = items.filter(i => i.checked)
+  const filtered = search.trim() ? items.filter(i => i.name.toLowerCase().includes(search.toLowerCase())) : items
+  const unchecked = filtered.filter(i => !i.checked)
+  const checked = filtered.filter(i => i.checked)
 
   const grouped: Record<string, ShoppingItem[]> = {}
   for (const item of unchecked) {
@@ -123,6 +128,15 @@ export default function BoodschappenClient({ initialItems }: { initialItems: Sho
           </button>
         )}
       </div>
+
+      {/* Search */}
+      <input
+        type="search"
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+        placeholder="Zoeken..."
+        className="w-full px-4 py-2.5 rounded-2xl border border-stone-200 bg-white text-sm outline-none focus:ring-2 focus:ring-orange-400"
+      />
 
       {/* Add item */}
       <form onSubmit={addItem} className="flex gap-2">
@@ -156,7 +170,7 @@ export default function BoodschappenClient({ initialItems }: { initialItems: Sho
               <p className="text-xs font-semibold text-stone-400 uppercase tracking-wide mb-2">{category}</p>
               <div className="space-y-1">
                 {grouped[category].map(item => (
-                  <ItemRow key={item.id} item={item} onToggle={toggleItem} />
+                  <ItemRow key={item.id} item={item} onToggle={toggleItem} onDelete={deleteItem} />
                 ))}
               </div>
             </div>
@@ -167,7 +181,7 @@ export default function BoodschappenClient({ initialItems }: { initialItems: Sho
               <p className="text-xs font-semibold text-stone-300 uppercase tracking-wide mb-2">Afgevinkt</p>
               <div className="space-y-1 opacity-50">
                 {checked.map(item => (
-                  <ItemRow key={item.id} item={item} onToggle={toggleItem} />
+                  <ItemRow key={item.id} item={item} onToggle={toggleItem} onDelete={deleteItem} />
                 ))}
               </div>
             </div>
@@ -178,25 +192,63 @@ export default function BoodschappenClient({ initialItems }: { initialItems: Sho
   )
 }
 
-function ItemRow({ item, onToggle }: { item: ShoppingItem; onToggle: (item: ShoppingItem) => void }) {
+function ItemRow({ item, onToggle, onDelete }: {
+  item: ShoppingItem
+  onToggle: (item: ShoppingItem) => void
+  onDelete: (item: ShoppingItem) => void
+}) {
+  const [offsetX, setOffsetX] = useState(0)
+  const startX = useRef(0)
+  const isDragging = useRef(false)
+
+  function onPointerDown(e: React.PointerEvent) {
+    startX.current = e.clientX
+    isDragging.current = false
+  }
+
+  function onPointerMove(e: React.PointerEvent) {
+    const dx = e.clientX - startX.current
+    if (Math.abs(dx) > 5) isDragging.current = true
+    if (dx < 0) setOffsetX(Math.max(dx, -80))
+    else setOffsetX(Math.min(dx, 0))
+  }
+
+  function onPointerUp() {
+    if (offsetX < -60) {
+      onDelete(item)
+    } else {
+      setOffsetX(0)
+    }
+  }
+
   return (
-    <button
-      onClick={() => onToggle(item)}
-      className="w-full flex items-center gap-3 bg-white rounded-xl px-3 py-2.5 border border-stone-100 hover:border-orange-200 transition-colors text-left"
-    >
-      <div className={`w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
-        item.checked ? 'bg-orange-500 border-orange-500' : 'border-stone-300'
-      }`}>
-        {item.checked && <span className="text-white text-xs">✓</span>}
+    <div className="relative overflow-hidden rounded-xl">
+      <div className="absolute inset-y-0 right-0 w-20 bg-red-500 flex items-center justify-center rounded-xl">
+        <span className="text-white text-sm font-medium">Wis</span>
       </div>
-      <span className={`flex-1 text-sm ${item.checked ? 'line-through text-stone-400' : 'text-stone-800'}`}>
-        {item.name}
-      </span>
-      {(item.quantity || item.unit) && (
-        <span className="text-xs text-stone-400 flex-shrink-0">
-          {item.quantity ? (Number.isInteger(item.quantity) ? item.quantity : item.quantity.toFixed(1)) : ''} {item.unit}
+      <div
+        className="relative flex items-center gap-3 bg-white px-3 py-2.5 border border-stone-100 rounded-xl text-left touch-pan-y transition-transform"
+        style={{ transform: `translateX(${offsetX}px)`, transitionDuration: offsetX === 0 ? '200ms' : '0ms' }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerLeave={onPointerUp}
+        onClick={() => { if (!isDragging.current) onToggle(item) }}
+      >
+        <div className={`w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
+          item.checked ? 'bg-orange-500 border-orange-500' : 'border-stone-300'
+        }`}>
+          {item.checked && <span className="text-white text-xs">✓</span>}
+        </div>
+        <span className={`flex-1 text-sm ${item.checked ? 'line-through text-stone-400' : 'text-stone-800'}`}>
+          {item.name}
         </span>
-      )}
-    </button>
+        {(item.quantity || item.unit) && (
+          <span className="text-xs text-stone-400 flex-shrink-0">
+            {item.quantity ? (Number.isInteger(item.quantity) ? item.quantity : item.quantity.toFixed(1)) : ''} {item.unit}
+          </span>
+        )}
+      </div>
+    </div>
   )
 }

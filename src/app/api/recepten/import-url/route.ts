@@ -1,11 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
+import { createClient } from '@/lib/supabase/server'
 
 const anthropic = new Anthropic()
 
 export async function POST(req: NextRequest) {
   const { url } = await req.json()
   if (!url) return NextResponse.json({ error: 'No URL' }, { status: 400 })
+
+  // Return existing recipe if this URL was already imported
+  const supabase = await createClient()
+  const { data: existing } = await supabase
+    .from('recipes')
+    .select('*')
+    .eq('source_url', url)
+    .maybeSingle()
+  if (existing) return NextResponse.json({ recipe: existing, source_url: url, cached: true })
 
   try {
     const res = await fetch(url, {

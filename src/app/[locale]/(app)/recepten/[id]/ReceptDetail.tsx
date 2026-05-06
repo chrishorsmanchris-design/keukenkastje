@@ -1,8 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { compressImage } from '@/lib/compress-image'
+import { useToast } from '@/components/Toast'
 import type { Recipe, Ingredient } from '@/lib/types'
 
 function categorize(name: string): string {
@@ -25,6 +27,7 @@ const CUISINE_FLAGS: Record<string, string> = {
 
 export default function ReceptDetail({ recipe }: { recipe: Recipe }) {
   const router = useRouter()
+  const toast = useToast()
   const [servings, setServings] = useState(recipe.servings)
   const [kookstand, setKookstand] = useState(false)
   const [activeStep, setActiveStep] = useState(0)
@@ -32,6 +35,9 @@ export default function ReceptDetail({ recipe }: { recipe: Recipe }) {
   const [added, setAdded] = useState(false)
   const [imageUrl, setImageUrl] = useState(recipe.image_url ?? '')
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
+  const [notes, setNotes] = useState(recipe.notes ?? '')
+  const [savingNotes, setSavingNotes] = useState(false)
+  const notesTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const ratio = servings / recipe.servings
 
@@ -46,13 +52,35 @@ export default function ReceptDetail({ recipe }: { recipe: Recipe }) {
     const file = e.target.files?.[0]
     if (!file) return
     setUploadingPhoto(true)
+    const compressed = await compressImage(file)
     const formData = new FormData()
-    formData.append('file', file)
+    formData.append('file', compressed)
     formData.append('recipeId', recipe.id)
     const res = await fetch('/api/recepten/upload-image', { method: 'POST', body: formData })
     const { url } = await res.json()
     if (url) setImageUrl(url)
     setUploadingPhoto(false)
+  }
+
+  function handleNotesChange(value: string) {
+    setNotes(value)
+    if (notesTimer.current) clearTimeout(notesTimer.current)
+    notesTimer.current = setTimeout(async () => {
+      setSavingNotes(true)
+      const supabase = createClient()
+      await supabase.from('recipes').update({ notes: value }).eq('id', recipe.id)
+      setSavingNotes(false)
+    }, 800)
+  }
+
+  async function shareRecipe() {
+    const url = window.location.href
+    if (navigator.share) {
+      await navigator.share({ title: recipe.title, url })
+    } else {
+      await navigator.clipboard.writeText(url)
+      toast('Link gekopieerd!')
+    }
   }
 
   async function addToShoppingList() {
@@ -111,7 +139,11 @@ export default function ReceptDetail({ recipe }: { recipe: Recipe }) {
               ))}
             </div>
           </div>
-          <button onClick={() => router.back()} className="text-stone-400 flex-shrink-0">✕</button>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button onClick={shareRecipe} className="text-stone-400 text-lg">⬆️</button>
+            <button onClick={() => router.push(`${window.location.pathname}/bewerken`)} className="text-stone-400 text-sm px-2 py-1 bg-stone-100 rounded-lg">Bewerken</button>
+            <button onClick={() => router.back()} className="text-stone-400">✕</button>
+          </div>
         </div>
 
         {/* Time info */}
@@ -182,6 +214,21 @@ export default function ReceptDetail({ recipe }: { recipe: Recipe }) {
           </ol>
         </div>
 
+        {/* Notes */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="font-semibold">Notities</h2>
+            {savingNotes && <span className="text-xs text-stone-400">Opslaan...</span>}
+          </div>
+          <textarea
+            value={notes}
+            onChange={e => handleNotesChange(e.target.value)}
+            placeholder="Jouw notities bij dit recept..."
+            rows={3}
+            className="w-full px-3 py-2.5 rounded-2xl border border-stone-200 text-sm outline-none focus:ring-2 focus:ring-orange-400 resize-none"
+          />
+        </div>
+
         <button
           onClick={() => setKookstand(true)}
           className="w-full py-3.5 bg-orange-500 text-white font-medium rounded-2xl hover:bg-orange-600 transition-colors"
@@ -204,6 +251,47 @@ function KookstandView({
   const steps = recipe.steps as { order: number; text: string; timer_minutes?: number }[]
   const step = steps[activeStep]
   const isLast = activeStep === steps.length - 1
+  const [secondsLeft, setSecondsLeft] = useState<number | null>(null)
+  const [timerRunning, setTimerRunning] = useState(false)
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  function startTimer() {
+    if (!step.timer_minutes) return
+    const secs = step.timer_minutes * 60
+    setSecondsLeft(secs)
+    setTimerRunning(true)
+  }
+
+  function stopTimer() {
+    if (timerRef.current) clearInterval(timerRef.current)
+    setTimerRunning(false)
+    setSecondsLeft(null)
+  }
+
+  useEffect(() => {
+    if (timerRunning && secondsLeft !== null) {
+      timerRef.current = setInterval(() => {
+        setSecondsLeft(s => {
+          if (s === null || s <= 1) {
+            clearInterval(timerRef.current!)
+            setTimerRunning(false)
+            if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate([400, 100, 400])
+            return 0
+          }
+          return s - 1
+        })
+      }, 1000)
+    }
+    return () => { if (timerRef.current) clearInterval(timerRef.current) }
+  }, [timerRunning])
+
+  // Reset timer when step changes
+  useEffect(() => { stopTimer() }, [activeStep])
+
+  const mins = secondsLeft !== null ? Math.floor(secondsLeft / 60) : 0
+  const secs = secondsLeft !== null ? secondsLeft % 60 : 0
+  const totalSecs = (step.timer_minutes ?? 0) * 60
+  const progress = totalSecs > 0 && secondsLeft !== null ? secondsLeft / totalSecs : 0
 
   return (
     <div className="min-h-screen bg-stone-900 text-white flex flex-col px-6 py-8">
@@ -224,6 +312,55 @@ function KookstandView({
       <div className="flex-1 flex flex-col justify-center">
         <p className="text-orange-400 text-sm font-medium mb-4">Stap {activeStep + 1} van {steps.length}</p>
         <p className="text-2xl leading-relaxed font-medium">{step.text}</p>
+
+        {step.timer_minutes && (
+          <div className="mt-8">
+            {secondsLeft !== null ? (
+              <div className="space-y-4">
+                {/* Circular progress */}
+                <div className="flex justify-center">
+                  <div className="relative w-32 h-32">
+                    <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
+                      <circle cx="50" cy="50" r="44" fill="none" stroke="#292524" strokeWidth="8" />
+                      <circle
+                        cx="50" cy="50" r="44" fill="none"
+                        stroke={secondsLeft === 0 ? '#22c55e' : '#f97316'}
+                        strokeWidth="8"
+                        strokeLinecap="round"
+                        strokeDasharray={`${2 * Math.PI * 44}`}
+                        strokeDashoffset={`${2 * Math.PI * 44 * (1 - progress)}`}
+                        className="transition-all duration-1000"
+                      />
+                    </svg>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center">
+                      {secondsLeft === 0 ? (
+                        <span className="text-green-400 text-2xl">✓</span>
+                      ) : (
+                        <>
+                          <span className="text-2xl font-bold tabular-nums">
+                            {String(mins).padStart(2, '0')}:{String(secs).padStart(2, '0')}
+                          </span>
+                          <span className="text-xs text-stone-400">over</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <button onClick={stopTimer} className="w-full py-3 bg-stone-800 rounded-2xl text-sm">
+                  Timer stoppen
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={startTimer}
+                className="w-full py-3.5 bg-stone-800 border border-stone-700 rounded-2xl font-medium flex items-center justify-center gap-2"
+              >
+                <span>⏱</span>
+                <span>Timer starten — {step.timer_minutes} min</span>
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex gap-3 mt-8">

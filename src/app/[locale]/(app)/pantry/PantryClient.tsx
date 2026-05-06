@@ -2,6 +2,7 @@
 
 import { useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { predictExpiry } from '@/lib/expiry'
 import type { PantryItem } from '@/lib/types'
 
 function daysUntil(dateStr?: string): number | null {
@@ -70,14 +71,8 @@ export default function PantryClient({ initialItems }: { initialItems: PantryIte
     const supabase = createClient()
     const householdId = await getHousehold()
 
-    // Predict expiry
-    const formData = new FormData()
-    formData.append('name', newItem.name)
-    const res = await fetch('/api/pantry/scan', { method: 'POST', body: formData })
-    const { expires_at } = await res.json()
-
     const { data } = await supabase.from('pantry_items').insert({
-      ...newItem, expires_at, household_id: householdId,
+      ...newItem, expires_at: predictExpiry(newItem.name), household_id: householdId,
     }).select().single()
     if (data) setItems(prev => [...prev, data])
     setNewItem({ name: '', quantity: 1, unit: 'stuks' })
@@ -163,20 +158,32 @@ export default function PantryClient({ initialItems }: { initialItems: PantryIte
         </div>
       ) : (
         <div className="space-y-2">
-          {items.map(item => {
-            const days = daysUntil(item.expires_at)
-            const label = expiryLabel(days)
-            return (
-              <div key={item.id} className={`flex items-center gap-3 bg-white rounded-xl px-3 py-2.5 border transition-colors ${days !== null && days <= 3 ? 'border-orange-200' : 'border-stone-100'}`}>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{item.name}</p>
-                  <p className="text-xs text-stone-400">{item.quantity} {item.unit}</p>
+          {items
+            .sort((a, b) => {
+              const da = daysUntil(a.expires_at) ?? 999
+              const db = daysUntil(b.expires_at) ?? 999
+              return da - db
+            })
+            .map(item => {
+              const days = daysUntil(item.expires_at)
+              const label = expiryLabel(days)
+              const rowClass =
+                days !== null && days < 0 ? 'bg-red-50 border-red-200' :
+                days !== null && days === 0 ? 'bg-red-50 border-red-200' :
+                days !== null && days <= 3 ? 'bg-orange-50 border-orange-200' :
+                days !== null && days <= 7 ? 'bg-yellow-50 border-yellow-200' :
+                'bg-white border-stone-100'
+              return (
+                <div key={item.id} className={`flex items-center gap-3 rounded-xl px-3 py-2.5 border transition-colors ${rowClass}`}>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{item.name}</p>
+                    <p className="text-xs text-stone-400">{item.quantity} {item.unit}</p>
+                  </div>
+                  {label && <span className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 ${label.color}`}>{label.text}</span>}
+                  <button onClick={() => removeItem(item.id)} className="text-stone-300 hover:text-red-400 transition-colors flex-shrink-0">✕</button>
                 </div>
-                {label && <span className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 ${label.color}`}>{label.text}</span>}
-                <button onClick={() => removeItem(item.id)} className="text-stone-200 hover:text-red-400 transition-colors flex-shrink-0">✕</button>
-              </div>
-            )
-          })}
+              )
+            })}
         </div>
       )}
 

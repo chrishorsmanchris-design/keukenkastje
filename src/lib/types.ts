@@ -17,6 +17,7 @@ export type Recipe = {
   diet_labels: string[]
   ingredients: Ingredient[]
   steps: Step[]
+  notes?: string
   created_at: string
 }
 

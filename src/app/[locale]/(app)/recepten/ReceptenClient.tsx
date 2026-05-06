@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import Image from 'next/image'
 import { useParams } from 'next/navigation'
 import type { Recipe } from '@/lib/types'
 
@@ -102,7 +103,9 @@ function RecipeCard({ recipe, locale }: { recipe: Recipe; locale: string }) {
   return (
     <Link href={`/${locale}/recepten/${recipe.id}`} className="bg-white rounded-2xl overflow-hidden border border-stone-100 hover:shadow-md transition-shadow">
       {recipe.image_url ? (
-        <img src={recipe.image_url} alt={recipe.title} className="w-full h-28 object-cover" />
+        <div className="relative w-full h-28">
+          <Image src={recipe.image_url} alt={recipe.title} fill className="object-cover" sizes="(max-width: 768px) 50vw, 200px" />
+        </div>
       ) : (
         <div className="w-full h-28 bg-stone-100 flex items-center justify-center text-3xl">🍽️</div>
       )}
