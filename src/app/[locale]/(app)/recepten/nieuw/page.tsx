@@ -14,6 +14,7 @@ export default function NieuwReceptPage() {
   const { locale } = useParams()
   const [importUrl, setImportUrl] = useState('')
   const [importing, setImporting] = useState(false)
+  const [importError, setImportError] = useState('')
   const [saving, setSaving] = useState(false)
   const [pendingPhoto, setPendingPhoto] = useState<File | null>(null)
   const [photoPreview, setPhotoPreview] = useState('')
@@ -28,17 +29,19 @@ export default function NieuwReceptPage() {
 
   async function handleImport() {
     setImporting(true)
+    setImportError('')
     try {
       const res = await fetch('/api/recepten/import-url', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: importUrl }),
       })
-      const { recipe, source_url } = await res.json()
-      setForm(f => ({ ...f, ...recipe, source_url: source_url ?? importUrl }))
-      if (recipe.image_url) setPhotoPreview(recipe.image_url)
-    } catch {
-      alert('Import mislukt, probeer een andere URL.')
+      const data = await res.json()
+      if (!res.ok) { setImportError(data.error); setImporting(false); return }
+      setForm(f => ({ ...f, ...data.recipe, source_url: data.source_url ?? importUrl }))
+      if (data.recipe.image_url) setPhotoPreview(data.recipe.image_url)
+    } catch (e) {
+      setImportError('Kan de URL niet bereiken.')
     }
     setImporting(false)
   }
@@ -111,6 +114,7 @@ export default function NieuwReceptPage() {
             {importing ? '...' : 'Haal op'}
           </button>
         </div>
+        {importError && <p className="text-red-500 text-xs mt-1">{importError}</p>}
       </div>
 
       {/* Photo */}
