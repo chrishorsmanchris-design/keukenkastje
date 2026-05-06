@@ -15,6 +15,8 @@ export default function NieuwReceptPage() {
   const [importUrl, setImportUrl] = useState('')
   const [importing, setImporting] = useState(false)
   const [importError, setImportError] = useState('')
+  const [scanning, setScanning] = useState(false)
+  const [scanError, setScanError] = useState('')
   const [saving, setSaving] = useState(false)
   const [pendingPhoto, setPendingPhoto] = useState<File | null>(null)
   const [photoPreview, setPhotoPreview] = useState('')
@@ -44,6 +46,26 @@ export default function NieuwReceptPage() {
       setImportError('Kan de URL niet bereiken.')
     }
     setImporting(false)
+  }
+
+  async function handleBookScan(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setScanning(true)
+    setScanError('')
+    setPhotoPreview(URL.createObjectURL(file))
+    setPendingPhoto(file)
+    const fd = new FormData()
+    fd.append('image', file)
+    try {
+      const res = await fetch('/api/recepten/scan', { method: 'POST', body: fd })
+      const data = await res.json()
+      if (!res.ok) { setScanError(data.error); setScanning(false); return }
+      setForm(f => ({ ...f, ...data.recipe }))
+    } catch {
+      setScanError('Kan de foto niet verwerken.')
+    }
+    setScanning(false)
   }
 
   function handlePhotoSelect(e: React.ChangeEvent<HTMLInputElement>) {
@@ -95,26 +117,51 @@ export default function NieuwReceptPage() {
         <h1 className="text-xl font-semibold">Nieuw recept</h1>
       </div>
 
-      {/* URL Import */}
-      <div className="bg-orange-50 rounded-2xl p-4 space-y-2">
-        <p className="text-sm font-medium text-orange-800">Importeer via URL</p>
-        <div className="flex gap-2">
-          <input
-            type="url"
-            placeholder="https://jamieoliver.com/..."
-            value={importUrl}
-            onChange={e => setImportUrl(e.target.value)}
-            className="flex-1 px-3 py-2 rounded-xl border border-orange-200 bg-white text-sm outline-none focus:ring-2 focus:ring-orange-400"
-          />
-          <button
-            onClick={handleImport}
-            disabled={importing || !importUrl}
-            className="px-4 py-2 bg-orange-500 text-white text-sm rounded-xl disabled:opacity-50 hover:bg-orange-600 transition-colors"
-          >
-            {importing ? '...' : 'Haal op'}
-          </button>
+      {/* Import opties */}
+      <div className="grid grid-cols-2 gap-3">
+        {/* URL Import */}
+        <div className="col-span-2 bg-orange-50 rounded-2xl p-4 space-y-2">
+          <p className="text-sm font-medium text-orange-800">Importeer via URL</p>
+          <div className="flex gap-2">
+            <input
+              type="url"
+              placeholder="https://jamieoliver.com/..."
+              value={importUrl}
+              onChange={e => setImportUrl(e.target.value)}
+              className="flex-1 px-3 py-2 rounded-xl border border-orange-200 bg-white text-sm outline-none focus:ring-2 focus:ring-orange-400"
+            />
+            <button
+              onClick={handleImport}
+              disabled={importing || !importUrl}
+              className="px-4 py-2 bg-orange-500 text-white text-sm rounded-xl disabled:opacity-50 hover:bg-orange-600 transition-colors"
+            >
+              {importing ? '...' : 'Haal op'}
+            </button>
+          </div>
+          {importError && <p className="text-red-500 text-xs">{importError}</p>}
         </div>
-        {importError && <p className="text-red-500 text-xs mt-1">{importError}</p>}
+
+        {/* Kookboek scan */}
+        <label className="col-span-2 cursor-pointer">
+          <div className={`bg-stone-100 rounded-2xl p-4 flex items-center gap-3 hover:bg-stone-200 transition-colors ${scanning ? 'opacity-60' : ''}`}>
+            <span className="text-2xl">📖</span>
+            <div>
+              <p className="text-sm font-medium text-stone-700">
+                {scanning ? 'Recept scannen...' : 'Scan kookboekpagina'}
+              </p>
+              <p className="text-xs text-stone-400">Maak een foto of kies een afbeelding</p>
+            </div>
+          </div>
+          {scanError && <p className="text-red-500 text-xs mt-1 px-1">{scanError}</p>}
+          <input
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={handleBookScan}
+            disabled={scanning}
+          />
+        </label>
       </div>
 
       {/* Photo */}
