@@ -1,0 +1,72 @@
+{
+  "nav": {
+    "recepten": "Recipes",
+    "pantry": "Pantry",
+    "weekmenu": "Week menu",
+    "boodschappenlijst": "Shopping list"
+  },
+  "auth": {
+    "login": "Login",
+    "logout": "Logout",
+    "email": "Email address",
+    "password": "Password",
+    "loginButton": "Login",
+    "noAccount": "No account yet?",
+    "invite": "Invite",
+    "inviteEmail": "Partner email address",
+    "inviteButton": "Send invitation",
+    "inviteSuccess": "Invitation sent!",
+    "magicLink": "Send login link",
+    "magicLinkSent": "Check your email for the login link.",
+    "welcomeBack": "Welcome back"
+  },
+  "dashboard": {
+    "title": "Good evening",
+    "suggestie": "What are you cooking tonight?",
+    "weekmenuLeeg": "No week menu planned yet",
+    "planWeek": "Plan this week"
+  },
+  "recepten": {
+    "title": "Recipes",
+    "nieuw": "New recipe",
+    "zoeken": "Search recipes...",
+    "importUrl": "Import via URL",
+    "importFoto": "Photo from cookbook",
+    "personen": "people",
+    "minuten": "min",
+    "stappen": "Steps",
+    "ingredienten": "Ingredients",
+    "kookstand": "Start cooking mode",
+    "toevoegenAanWeek": "Add to week menu",
+    "categorieen": "Categories",
+    "filter": "Filter"
+  },
+  "pantry": {
+    "title": "Pantry",
+    "toevoegen": "Add product",
+    "scanFoto": "Scan photo",
+    "verlooptBinnenkort": "Expiring soon",
+    "houdbaarheidTot": "Best before",
+    "stuks": "pcs"
+  },
+  "weekmenu": {
+    "title": "Week menu",
+    "maandag": "Monday",
+    "dinsdag": "Tuesday",
+    "woensdag": "Wednesday",
+    "donderdag": "Thursday",
+    "vrijdag": "Friday",
+    "zaterdag": "Saturday",
+    "zondag": "Sunday",
+    "avondeten": "Dinner",
+    "receptKiezen": "Choose recipe",
+    "naarBoodschappenlijst": "Generate shopping list"
+  },
+  "boodschappenlijst": {
+    "title": "Shopping list",
+    "toevoegen": "Add item",
+    "leeg": "Your list is empty",
+    "afgerond": "completed",
+    "wissen": "Clear checked"
+  }
+}

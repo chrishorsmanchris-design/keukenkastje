@@ -1,0 +1,72 @@
+{
+  "nav": {
+    "recepten": "Recepten",
+    "pantry": "Pantry",
+    "weekmenu": "Weekmenu",
+    "boodschappenlijst": "Boodschappenlijst"
+  },
+  "auth": {
+    "login": "Inloggen",
+    "logout": "Uitloggen",
+    "email": "E-mailadres",
+    "password": "Wachtwoord",
+    "loginButton": "Inloggen",
+    "noAccount": "Nog geen account?",
+    "invite": "Uitnodigen",
+    "inviteEmail": "E-mailadres partner",
+    "inviteButton": "Uitnodiging versturen",
+    "inviteSuccess": "Uitnodiging verstuurd!",
+    "magicLink": "Stuur inloglink",
+    "magicLinkSent": "Controleer je e-mail voor de inloglink.",
+    "welcomeBack": "Welkom terug"
+  },
+  "dashboard": {
+    "title": "Goedenavond",
+    "suggestie": "Wat kook je vanavond?",
+    "weekmenuLeeg": "Nog geen weekmenu gepland",
+    "planWeek": "Plan deze week"
+  },
+  "recepten": {
+    "title": "Recepten",
+    "nieuw": "Nieuw recept",
+    "zoeken": "Zoek recepten...",
+    "importUrl": "Importeer via URL",
+    "importFoto": "Foto van kookboek",
+    "personen": "personen",
+    "minuten": "min",
+    "stappen": "Stappen",
+    "ingredienten": "Ingrediënten",
+    "kookstand": "Kookstand starten",
+    "toevoegenAanWeek": "Toevoegen aan weekmenu",
+    "categorieen": "Categorieën",
+    "filter": "Filteren"
+  },
+  "pantry": {
+    "title": "Pantry",
+    "toevoegen": "Product toevoegen",
+    "scanFoto": "Foto scannen",
+    "verlooptBinnenkort": "Verloopt binnenkort",
+    "houdbaarheidTot": "Houdbaar tot",
+    "stuks": "stuks"
+  },
+  "weekmenu": {
+    "title": "Weekmenu",
+    "maandag": "Maandag",
+    "dinsdag": "Dinsdag",
+    "woensdag": "Woensdag",
+    "donderdag": "Donderdag",
+    "vrijdag": "Vrijdag",
+    "zaterdag": "Zaterdag",
+    "zondag": "Zondag",
+    "avondeten": "Avondeten",
+    "receptKiezen": "Recept kiezen",
+    "naarBoodschappenlijst": "Boodschappenlijst genereren"
+  },
+  "boodschappenlijst": {
+    "title": "Boodschappenlijst",
+    "toevoegen": "Item toevoegen",
+    "leeg": "Je lijst is leeg",
+    "afgerond": "afgerond",
+    "wissen": "Afgevinkte wissen"
+  }
+}

@@ -1,0 +1,250 @@
+'use client'
+
+import { useState } from 'react'
+import { useRouter, useParams } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
+import type { Ingredient, Step } from '@/lib/types'
+
+const CUISINES = ['Italiaans', 'Midden-Oosters', 'Aziatisch', 'Nederlands', 'Mexicaans', 'Frans', 'Amerikaans']
+const TYPES = ['vis', 'vlees', 'kip', 'vegetarisch', 'pasta', 'rijst', 'soep', 'salade']
+const DIETS = ['vegetarisch', 'vegan', 'glutenvrij']
+
+export default function NieuwReceptPage() {
+  const router = useRouter()
+  const { locale } = useParams()
+  const [importUrl, setImportUrl] = useState('')
+  const [importing, setImporting] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [form, setForm] = useState({
+    title: '', description: '', source_url: '', source_name: '',
+    servings: 2, prep_time_minutes: 0, cook_time_minutes: 0,
+    cuisine: '', ingredient_type: '', diet_labels: [] as string[],
+    ingredients: [{ name: '', amount: '', unit: '' }] as Ingredient[],
+    steps: [{ order: 1, text: '', timer_minutes: undefined }] as Step[],
+  })
+
+  async function handleImport() {
+    setImporting(true)
+    try {
+      const res = await fetch('/api/recepten/import-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: importUrl }),
+      })
+      const { recipe, source_url } = await res.json()
+      setForm(f => ({ ...f, ...recipe, source_url: source_url ?? importUrl }))
+    } catch {
+      alert('Import mislukt, probeer een andere URL.')
+    }
+    setImporting(false)
+  }
+
+  async function handleSave() {
+    setSaving(true)
+    const supabase = createClient()
+    const { data: profile } = await supabase.from('profiles').select('household_id').single()
+    const { data, error } = await supabase.from('recipes').insert({
+      ...form,
+      household_id: profile?.household_id,
+    }).select().single()
+    setSaving(false)
+    if (!error && data) router.push(`/${locale}/recepten/${data.id}`)
+  }
+
+  function updateIngredient(i: number, field: keyof Ingredient, value: string) {
+    setForm(f => {
+      const ingredients = [...f.ingredients]
+      ingredients[i] = { ...ingredients[i], [field]: value }
+      return { ...f, ingredients }
+    })
+  }
+
+  function updateStep(i: number, value: string) {
+    setForm(f => {
+      const steps = [...f.steps]
+      steps[i] = { ...steps[i], text: value }
+      return { ...f, steps }
+    })
+  }
+
+  return (
+    <div className="px-4 pt-10 pb-8 space-y-6">
+      <div className="flex items-center gap-3">
+        <button onClick={() => router.back()} className="text-stone-400 hover:text-stone-700">←</button>
+        <h1 className="text-xl font-semibold">Nieuw recept</h1>
+      </div>
+
+      {/* URL Import */}
+      <div className="bg-orange-50 rounded-2xl p-4 space-y-2">
+        <p className="text-sm font-medium text-orange-800">Importeer via URL</p>
+        <div className="flex gap-2">
+          <input
+            type="url"
+            placeholder="https://jamieoliver.com/..."
+            value={importUrl}
+            onChange={e => setImportUrl(e.target.value)}
+            className="flex-1 px-3 py-2 rounded-xl border border-orange-200 bg-white text-sm outline-none focus:ring-2 focus:ring-orange-400"
+          />
+          <button
+            onClick={handleImport}
+            disabled={importing || !importUrl}
+            className="px-4 py-2 bg-orange-500 text-white text-sm rounded-xl disabled:opacity-50 hover:bg-orange-600 transition-colors"
+          >
+            {importing ? '...' : 'Haal op'}
+          </button>
+        </div>
+      </div>
+
+      {/* Title */}
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-stone-500 uppercase tracking-wide">Naam</label>
+        <input
+          type="text"
+          value={form.title}
+          onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+          placeholder="Naam van het recept"
+          className="w-full px-4 py-3 rounded-2xl border border-stone-200 text-sm outline-none focus:ring-2 focus:ring-orange-400"
+        />
+      </div>
+
+      {/* Servings + times */}
+      <div className="grid grid-cols-3 gap-3">
+        {[
+          { label: 'Personen', key: 'servings', suffix: '' },
+          { label: 'Prep (min)', key: 'prep_time_minutes', suffix: '' },
+          { label: 'Koken (min)', key: 'cook_time_minutes', suffix: '' },
+        ].map(({ label, key }) => (
+          <div key={key} className="space-y-1">
+            <label className="text-xs font-medium text-stone-500 uppercase tracking-wide">{label}</label>
+            <input
+              type="number"
+              value={(form as Record<string, unknown>)[key] as number}
+              onChange={e => setForm(f => ({ ...f, [key]: +e.target.value }))}
+              className="w-full px-3 py-2.5 rounded-2xl border border-stone-200 text-sm outline-none focus:ring-2 focus:ring-orange-400"
+            />
+          </div>
+        ))}
+      </div>
+
+      {/* Cuisine */}
+      <div className="space-y-2">
+        <label className="text-xs font-medium text-stone-500 uppercase tracking-wide">Keukenstijl</label>
+        <div className="flex flex-wrap gap-2">
+          {CUISINES.map(c => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => setForm(f => ({ ...f, cuisine: f.cuisine === c ? '' : c }))}
+              className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${form.cuisine === c ? 'bg-stone-800 text-white border-stone-800' : 'bg-white text-stone-600 border-stone-200'}`}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Type */}
+      <div className="space-y-2">
+        <label className="text-xs font-medium text-stone-500 uppercase tracking-wide">Type</label>
+        <div className="flex flex-wrap gap-2">
+          {TYPES.map(t => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setForm(f => ({ ...f, ingredient_type: f.ingredient_type === t ? '' : t }))}
+              className={`text-xs px-3 py-1.5 rounded-full border transition-colors capitalize ${form.ingredient_type === t ? 'bg-orange-500 text-white border-orange-500' : 'bg-white text-stone-600 border-stone-200'}`}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Diet labels */}
+      <div className="space-y-2">
+        <label className="text-xs font-medium text-stone-500 uppercase tracking-wide">Dieet</label>
+        <div className="flex gap-2">
+          {DIETS.map(d => (
+            <button
+              key={d}
+              type="button"
+              onClick={() => setForm(f => ({
+                ...f,
+                diet_labels: f.diet_labels.includes(d) ? f.diet_labels.filter(x => x !== d) : [...f.diet_labels, d],
+              }))}
+              className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${form.diet_labels.includes(d) ? 'bg-green-500 text-white border-green-500' : 'bg-white text-stone-600 border-stone-200'}`}
+            >
+              {d}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Ingredients */}
+      <div className="space-y-2">
+        <label className="text-xs font-medium text-stone-500 uppercase tracking-wide">Ingrediënten</label>
+        {form.ingredients.map((ing, i) => (
+          <div key={i} className="flex gap-2">
+            <input
+              placeholder="Hoeveelheid"
+              value={ing.amount}
+              onChange={e => updateIngredient(i, 'amount', e.target.value)}
+              className="w-20 px-3 py-2 rounded-xl border border-stone-200 text-sm outline-none focus:ring-2 focus:ring-orange-400"
+            />
+            <input
+              placeholder="Eenheid"
+              value={ing.unit}
+              onChange={e => updateIngredient(i, 'unit', e.target.value)}
+              className="w-20 px-3 py-2 rounded-xl border border-stone-200 text-sm outline-none focus:ring-2 focus:ring-orange-400"
+            />
+            <input
+              placeholder="Ingrediënt"
+              value={ing.name}
+              onChange={e => updateIngredient(i, 'name', e.target.value)}
+              className="flex-1 px-3 py-2 rounded-xl border border-stone-200 text-sm outline-none focus:ring-2 focus:ring-orange-400"
+            />
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={() => setForm(f => ({ ...f, ingredients: [...f.ingredients, { name: '', amount: '', unit: '' }] }))}
+          className="text-orange-500 text-sm"
+        >
+          + Ingrediënt toevoegen
+        </button>
+      </div>
+
+      {/* Steps */}
+      <div className="space-y-2">
+        <label className="text-xs font-medium text-stone-500 uppercase tracking-wide">Stappen</label>
+        {form.steps.map((step, i) => (
+          <div key={i} className="flex gap-2 items-start">
+            <span className="mt-2.5 text-xs text-stone-400 font-medium w-5 flex-shrink-0">{i + 1}</span>
+            <textarea
+              value={step.text}
+              onChange={e => updateStep(i, e.target.value)}
+              placeholder={`Stap ${i + 1}`}
+              rows={2}
+              className="flex-1 px-3 py-2 rounded-xl border border-stone-200 text-sm outline-none focus:ring-2 focus:ring-orange-400 resize-none"
+            />
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={() => setForm(f => ({ ...f, steps: [...f.steps, { order: f.steps.length + 1, text: '' }] }))}
+          className="text-orange-500 text-sm"
+        >
+          + Stap toevoegen
+        </button>
+      </div>
+
+      <button
+        onClick={handleSave}
+        disabled={saving || !form.title}
+        className="w-full py-3.5 bg-orange-500 text-white font-medium rounded-2xl disabled:opacity-50 hover:bg-orange-600 transition-colors"
+      >
+        {saving ? 'Opslaan...' : 'Recept opslaan'}
+      </button>
+    </div>
+  )
+}
