@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { predictExpiry } from '@/lib/expiry'
+import { useToast } from '@/components/Toast'
 import type { PantryItem } from '@/lib/types'
 
 function categorize(name: string): string {
@@ -46,7 +47,11 @@ export default function PantryClient({ initialItems }: { initialItems: PantryIte
   const [scanned, setScanned] = useState<ScannedProduct[]>([])
   const [saving, setSaving] = useState(false)
   const [newItem, setNewItem] = useState({ name: '', quantity: 1, unit: 'stuks' })
+  const [showBarcode, setShowBarcode] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+  const toast = useToast()
+
+  const expiringSoon = items.filter(i => { const d = daysUntil(i.expires_at); return d !== null && d <= 3 })
 
   // Realtime sync
   useEffect(() => {
@@ -65,8 +70,6 @@ export default function PantryClient({ initialItems }: { initialItems: PantryIte
       .subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [])
-
-  const expiringSoon = items.filter(i => { const d = daysUntil(i.expires_at); return d !== null && d <= 3 })
 
   async function getHousehold() {
     const supabase = createClient()
@@ -105,7 +108,6 @@ export default function PantryClient({ initialItems }: { initialItems: PantryIte
     setSaving(true)
     const supabase = createClient()
     const householdId = await getHousehold()
-
     const { data } = await supabase.from('pantry_items').insert({
       ...newItem, expires_at: predictExpiry(newItem.name), household_id: householdId,
     }).select().single()
@@ -115,11 +117,33 @@ export default function PantryClient({ initialItems }: { initialItems: PantryIte
     setSaving(false)
   }
 
+  async function addItemByName(name: string) {
+    const supabase = createClient()
+    const householdId = await getHousehold()
+    const { data } = await supabase.from('pantry_items').insert({
+      name, quantity: 1, unit: 'stuks',
+      expires_at: predictExpiry(name),
+      household_id: householdId,
+    }).select().single()
+    if (data) setItems(prev => [...prev, data])
+    toast(`${name} toegevoegd aan pantry`, 'success')
+  }
+
   async function removeItem(id: string) {
     const supabase = createClient()
     setItems(prev => prev.filter(i => i.id !== id))
     await supabase.from('pantry_items').delete().eq('id', id)
   }
+
+  const updateQuantity = useCallback(async (id: string, quantity: number) => {
+    if (quantity <= 0) {
+      removeItem(id)
+      return
+    }
+    setItems(prev => prev.map(i => i.id === id ? { ...i, quantity } : i))
+    const supabase = createClient()
+    await supabase.from('pantry_items').update({ quantity }).eq('id', id)
+  }, []) // eslint-disable-line
 
   const changeCategory = useCallback(async (id: string, category: string) => {
     setItems(prev => prev.map(i => i.id === id ? { ...i, category } : i))
@@ -132,6 +156,13 @@ export default function PantryClient({ initialItems }: { initialItems: PantryIte
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Pantry</h1>
         <div className="flex gap-2">
+          <button
+            onClick={() => setShowBarcode(true)}
+            className="bg-stone-100 text-stone-700 text-sm font-medium px-3 py-2 rounded-full hover:bg-stone-200 transition-colors"
+            title="Barcode scannen"
+          >
+            🔍 Barcode
+          </button>
           <button
             onClick={() => fileRef.current?.click()}
             disabled={scanning}
@@ -227,6 +258,7 @@ export default function PantryClient({ initialItems }: { initialItems: PantryIte
                         rowClass={rowClass}
                         label={label}
                         onRemove={removeItem}
+                        onUpdateQuantity={updateQuantity}
                         onChangeCategory={changeCategory}
                       />
                     )
@@ -276,15 +308,29 @@ export default function PantryClient({ initialItems }: { initialItems: PantryIte
           </form>
         </div>
       )}
+
+      {/* Barcode scanner */}
+      {showBarcode && (
+        <BarcodeScanner
+          onResult={async (name) => {
+            setShowBarcode(false)
+            await addItemByName(name)
+          }}
+          onClose={() => setShowBarcode(false)}
+        />
+      )}
     </div>
   )
 }
 
-function PantryRow({ item, rowClass, label, onRemove, onChangeCategory }: {
+// ─── PantryRow ────────────────────────────────────────────────────────────────
+
+function PantryRow({ item, rowClass, label, onRemove, onUpdateQuantity, onChangeCategory }: {
   item: PantryItem
   rowClass: string
   label: { text: string; color: string } | null
   onRemove: (id: string) => void
+  onUpdateQuantity: (id: string, qty: number) => void
   onChangeCategory: (id: string, category: string) => void
 }) {
   const [showPicker, setShowPicker] = useState(false)
@@ -295,8 +341,27 @@ function PantryRow({ item, rowClass, label, onRemove, onChangeCategory }: {
       <div className="flex items-center gap-3 px-3 py-2.5">
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium truncate">{item.name}</p>
-          <p className="text-xs text-stone-400">{item.quantity} {item.unit}</p>
         </div>
+
+        {/* Quantity −/+ */}
+        <div className="flex items-center gap-1 bg-white/70 rounded-full px-1.5 py-0.5 border border-stone-200 flex-shrink-0">
+          <button
+            onClick={() => onUpdateQuantity(item.id, item.quantity - 1)}
+            className="w-5 h-5 flex items-center justify-center text-stone-500 hover:text-red-500 transition-colors text-sm"
+          >
+            −
+          </button>
+          <span className="text-xs font-medium tabular-nums min-w-[2rem] text-center">
+            {item.quantity} {item.unit}
+          </span>
+          <button
+            onClick={() => onUpdateQuantity(item.id, item.quantity + 1)}
+            className="w-5 h-5 flex items-center justify-center text-stone-500 hover:text-green-600 transition-colors text-sm"
+          >
+            +
+          </button>
+        </div>
+
         {label && <span className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 ${label.color}`}>{label.text}</span>}
         <button
           onClick={() => setShowPicker(p => !p)}
@@ -327,6 +392,192 @@ function PantryRow({ item, rowClass, label, onRemove, onChangeCategory }: {
             ))}
           </div>
         </div>
+      )}
+    </div>
+  )
+}
+
+// ─── BarcodeScanner ───────────────────────────────────────────────────────────
+
+type ScanStatus = 'starting' | 'scanning' | 'looking-up' | 'not-found' | 'no-support' | 'error'
+
+function BarcodeScanner({ onResult, onClose }: {
+  onResult: (name: string) => void
+  onClose: () => void
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const activeRef = useRef(true)
+  const [status, setStatus] = useState<ScanStatus>('starting')
+  const [manualCode, setManualCode] = useState('')
+  const [foundName, setFoundName] = useState('')
+
+  const hasDetector = typeof window !== 'undefined' && 'BarcodeDetector' in window
+
+  useEffect(() => {
+    if (!hasDetector) { setStatus('no-support'); return }
+
+    async function start() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+        streamRef.current = stream
+        if (!activeRef.current) { stream.getTracks().forEach(t => t.stop()); return }
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream
+          await videoRef.current.play()
+        }
+        setStatus('scanning')
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const detector = new (window as any).BarcodeDetector({
+          formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128'],
+        })
+
+        const scan = async () => {
+          if (!activeRef.current || !videoRef.current) return
+          try {
+            const barcodes = await detector.detect(videoRef.current)
+            if (barcodes.length > 0) {
+              streamRef.current?.getTracks().forEach(t => t.stop())
+              await lookupBarcode(barcodes[0].rawValue)
+              return
+            }
+          } catch { /* continue scanning */ }
+          if (activeRef.current) requestAnimationFrame(scan)
+        }
+        requestAnimationFrame(scan)
+      } catch {
+        setStatus('error')
+      }
+    }
+    start()
+
+    return () => {
+      activeRef.current = false
+      streamRef.current?.getTracks().forEach(t => t.stop())
+    }
+  }, []) // eslint-disable-line
+
+  async function lookupBarcode(code: string) {
+    setStatus('looking-up')
+    try {
+      const res = await fetch(`https://world.openfoodfacts.org/api/v0/product/${code}.json`)
+      const data = await res.json()
+      if (data.status === 1) {
+        const name =
+          data.product.product_name_nl ||
+          data.product.product_name ||
+          data.product.generic_name_nl ||
+          data.product.generic_name
+        if (name?.trim()) {
+          setFoundName(name.trim())
+          return
+        }
+      }
+    } catch { /* fall through */ }
+    setStatus('not-found')
+  }
+
+  async function handleManualLookup() {
+    if (!manualCode.trim()) return
+    streamRef.current?.getTracks().forEach(t => t.stop())
+    await lookupBarcode(manualCode.trim())
+  }
+
+  // Product found — confirm screen
+  if (foundName) {
+    return (
+      <div className="fixed inset-0 bg-black/80 z-50 flex items-end">
+        <div className="bg-white w-full rounded-t-3xl p-6 space-y-4">
+          <h2 className="font-semibold">Product gevonden</h2>
+          <div className="bg-green-50 border border-green-200 rounded-2xl px-4 py-3">
+            <p className="text-sm font-medium text-green-800">{foundName}</p>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="flex-1 py-3 border border-stone-200 rounded-2xl text-sm">Annuleren</button>
+            <button
+              onClick={() => onResult(foundName)}
+              className="flex-1 py-3 bg-orange-500 text-white rounded-2xl text-sm font-medium"
+            >
+              Toevoegen aan pantry
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black z-50 flex flex-col">
+      {/* Header */}
+      <div className="flex items-center justify-between p-4 z-10 bg-black/40">
+        <h2 className="text-white font-semibold">Barcode scannen</h2>
+        <button onClick={onClose} className="text-white text-xl w-8 h-8 flex items-center justify-center">✕</button>
+      </div>
+
+      {/* States */}
+      {(status === 'no-support' || status === 'error' || status === 'not-found') ? (
+        <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6">
+          <div className="text-5xl">
+            {status === 'not-found' ? '❓' : '📱'}
+          </div>
+          <p className="text-white text-center text-sm leading-relaxed">
+            {status === 'not-found'
+              ? 'Product niet gevonden in de database.\nVoer de barcode handmatig in:'
+              : 'Live scanner niet beschikbaar op dit apparaat.\nVoer de barcode in om het product op te zoeken:'}
+          </p>
+          <div className="flex gap-2 w-full max-w-xs">
+            <input
+              type="number"
+              placeholder="b.v. 8712345678901"
+              value={manualCode}
+              onChange={e => setManualCode(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleManualLookup()}
+              className="flex-1 px-4 py-3 rounded-2xl bg-stone-800 text-white text-sm outline-none border border-stone-700 focus:border-orange-400"
+              autoFocus
+            />
+            <button
+              onClick={handleManualLookup}
+              className="px-4 py-3 bg-orange-500 text-white rounded-2xl text-sm font-medium"
+            >
+              Zoek
+            </button>
+          </div>
+        </div>
+      ) : status === 'looking-up' ? (
+        <div className="flex-1 flex flex-col items-center justify-center gap-3">
+          <svg className="animate-spin w-10 h-10 text-orange-500" viewBox="0 0 24 24" fill="none">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+          </svg>
+          <p className="text-white/70 text-sm">Product opzoeken…</p>
+        </div>
+      ) : (
+        /* Live camera viewfinder */
+        <div className="flex-1 relative overflow-hidden">
+          <video ref={videoRef} className="w-full h-full object-cover" playsInline muted />
+          {/* Darkened overlay with cutout effect */}
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/50" />
+            <div
+              className="relative border-2 border-orange-400 rounded-xl animate-pulse"
+              style={{ width: 260, height: 100, zIndex: 1 }}
+            />
+          </div>
+          <p className="absolute bottom-6 left-0 right-0 text-center text-white/70 text-sm z-10">
+            Richt de camera op een barcode
+          </p>
+        </div>
+      )}
+
+      {/* Manual entry button at bottom when scanning */}
+      {(status === 'scanning' || status === 'starting') && (
+        <button
+          onClick={() => { streamRef.current?.getTracks().forEach(t => t.stop()); setStatus('no-support') }}
+          className="text-white/50 text-sm text-center py-4 hover:text-white/80 transition-colors"
+        >
+          Handmatig invoeren
+        </button>
       )}
     </div>
   )

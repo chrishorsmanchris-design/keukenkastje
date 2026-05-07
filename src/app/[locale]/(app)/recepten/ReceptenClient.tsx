@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { useParams } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
 import type { Recipe } from '@/lib/types'
 
 const CUISINES = ['Italiaans', 'Midden-Oosters', 'Aziatisch', 'Nederlands', 'Mexicaans', 'Frans', 'Amerikaans']
@@ -28,19 +29,40 @@ export default function ReceptenClient({ recipes }: { recipes: Recipe[] }) {
   const [filterCuisine, setFilterCuisine] = useState('')
   const [filterType, setFilterType] = useState('')
   const [filterTime, setFilterTime] = useState<number | null>(null)
+  const [onlyFavorites, setOnlyFavorites] = useState(false)
   const [sortBy, setSortBy] = useState<SortOption>('az')
 
-  const activeFilterCount = [filterCuisine, filterType, filterTime].filter(Boolean).length
+  // Local favorites state — optimistic updates
+  const [favorites, setFavorites] = useState<Set<string>>(
+    () => new Set(recipes.filter(r => r.is_favorite).map(r => r.id))
+  )
+
+  async function toggleFavorite(id: string, e: React.MouseEvent) {
+    e.preventDefault()
+    e.stopPropagation()
+    const next = !favorites.has(id)
+    setFavorites(prev => {
+      const s = new Set(prev)
+      next ? s.add(id) : s.delete(id)
+      return s
+    })
+    const supabase = createClient()
+    await supabase.from('recipes').update({ is_favorite: next }).eq('id', id)
+  }
+
+  const activeFilterCount = [filterCuisine, filterType, filterTime, onlyFavorites ? 'fav' : ''].filter(Boolean).length
 
   function clearAll() {
     setFilterCuisine('')
     setFilterType('')
     setFilterTime(null)
+    setOnlyFavorites(false)
     setSearch('')
   }
 
   const filtered = recipes
     .filter(r => {
+      if (onlyFavorites && !favorites.has(r.id)) return false
       const matchSearch = r.title.toLowerCase().includes(search.toLowerCase())
       const matchCuisine = !filterCuisine || r.cuisine === filterCuisine
       const matchType = !filterType || r.ingredient_type === filterType
@@ -80,24 +102,31 @@ export default function ReceptenClient({ recipes }: { recipes: Recipe[] }) {
         className="w-full px-4 py-2.5 rounded-2xl border border-stone-200 bg-white text-sm outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent"
       />
 
-      {/* Sort */}
+      {/* Sort + Favorites row */}
       <div className="flex items-center gap-2">
-        <span className="text-xs text-stone-400 flex-shrink-0">Sorteer:</span>
-        <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
+        <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide flex-1">
+          <span className="text-xs text-stone-400 self-center flex-shrink-0">Sorteer:</span>
           {([['az', 'A–Z'], ['nieuwst', 'Nieuwste'], ['snelst', 'Snelste']] as [SortOption, string][]).map(([val, label]) => (
             <button
               key={val}
               onClick={() => setSortBy(val)}
               className={`flex-shrink-0 text-xs px-3 py-1.5 rounded-full border transition-colors ${
-                sortBy === val
-                  ? 'bg-stone-800 text-white border-stone-800'
-                  : 'bg-white text-stone-600 border-stone-200'
+                sortBy === val ? 'bg-stone-800 text-white border-stone-800' : 'bg-white text-stone-600 border-stone-200'
               }`}
             >
               {label}
             </button>
           ))}
         </div>
+        {/* Favorites toggle */}
+        <button
+          onClick={() => setOnlyFavorites(v => !v)}
+          className={`flex-shrink-0 text-xs px-3 py-1.5 rounded-full border transition-colors ${
+            onlyFavorites ? 'bg-red-500 text-white border-red-500' : 'bg-white text-stone-600 border-stone-200'
+          }`}
+        >
+          {onlyFavorites ? '❤️ Favorieten' : '🤍 Favorieten'}
+        </button>
       </div>
 
       {/* Type filter */}
@@ -107,9 +136,7 @@ export default function ReceptenClient({ recipes }: { recipes: Recipe[] }) {
             key={t}
             onClick={() => setFilterType(filterType === t.toLowerCase() ? '' : t.toLowerCase())}
             className={`flex-shrink-0 text-xs px-3 py-1.5 rounded-full border transition-colors ${
-              filterType === t.toLowerCase()
-                ? 'bg-orange-500 text-white border-orange-500'
-                : 'bg-white text-stone-600 border-stone-200'
+              filterType === t.toLowerCase() ? 'bg-orange-500 text-white border-orange-500' : 'bg-white text-stone-600 border-stone-200'
             }`}
           >
             {t}
@@ -124,9 +151,7 @@ export default function ReceptenClient({ recipes }: { recipes: Recipe[] }) {
             key={c}
             onClick={() => setFilterCuisine(filterCuisine === c ? '' : c)}
             className={`flex-shrink-0 text-xs px-3 py-1.5 rounded-full border transition-colors ${
-              filterCuisine === c
-                ? 'bg-stone-800 text-white border-stone-800'
-                : 'bg-white text-stone-600 border-stone-200'
+              filterCuisine === c ? 'bg-stone-800 text-white border-stone-800' : 'bg-white text-stone-600 border-stone-200'
             }`}
           >
             {CUISINE_FLAGS[c]} {c}
@@ -143,9 +168,7 @@ export default function ReceptenClient({ recipes }: { recipes: Recipe[] }) {
               key={value}
               onClick={() => setFilterTime(filterTime === value ? null : value)}
               className={`flex-shrink-0 text-xs px-3 py-1.5 rounded-full border transition-colors ${
-                filterTime === value
-                  ? 'bg-blue-500 text-white border-blue-500'
-                  : 'bg-white text-stone-600 border-stone-200'
+                filterTime === value ? 'bg-blue-500 text-white border-blue-500' : 'bg-white text-stone-600 border-stone-200'
               }`}
             >
               {label}
@@ -153,11 +176,8 @@ export default function ReceptenClient({ recipes }: { recipes: Recipe[] }) {
           ))}
         </div>
         {activeFilterCount > 0 && (
-          <button
-            onClick={clearAll}
-            className="ml-auto text-xs text-stone-400 hover:text-red-400 transition-colors flex-shrink-0"
-          >
-            Wis filters ({activeFilterCount})
+          <button onClick={clearAll} className="ml-auto text-xs text-stone-400 hover:text-red-400 transition-colors flex-shrink-0">
+            Wis ({activeFilterCount})
           </button>
         )}
       </div>
@@ -165,26 +185,30 @@ export default function ReceptenClient({ recipes }: { recipes: Recipe[] }) {
       {/* Results */}
       {filtered.length === 0 ? (
         <div className="text-center py-16 text-stone-400">
-          <div className="text-4xl mb-3">📖</div>
+          <div className="text-4xl mb-3">{onlyFavorites ? '🤍' : '📖'}</div>
           <p className="text-sm">
-            {recipes.length === 0 ? 'Nog geen recepten' : 'Geen recepten gevonden'}
+            {recipes.length === 0 ? 'Nog geen recepten' : onlyFavorites ? 'Geen favorieten' : 'Geen recepten gevonden'}
           </p>
           {recipes.length === 0 ? (
             <Link href={`/${locale}/recepten/nieuw`} className="text-orange-500 text-sm mt-2 inline-block">
               Voeg je eerste recept toe
             </Link>
-          ) : activeFilterCount > 0 ? (
-            <button onClick={clearAll} className="text-orange-500 text-sm mt-2">
-              Filters wissen
-            </button>
-          ) : null}
+          ) : (
+            <button onClick={clearAll} className="text-orange-500 text-sm mt-2">Filters wissen</button>
+          )}
         </div>
       ) : (
         <>
           <p className="text-xs text-stone-400">{filtered.length} recept{filtered.length !== 1 ? 'en' : ''}</p>
           <div className="grid grid-cols-2 gap-3">
             {filtered.map(recipe => (
-              <RecipeCard key={recipe.id} recipe={recipe} locale={locale as string} />
+              <RecipeCard
+                key={recipe.id}
+                recipe={recipe}
+                locale={locale as string}
+                isFavorite={favorites.has(recipe.id)}
+                onToggleFavorite={toggleFavorite}
+              />
             ))}
           </div>
         </>
@@ -193,10 +217,17 @@ export default function ReceptenClient({ recipes }: { recipes: Recipe[] }) {
   )
 }
 
-function RecipeCard({ recipe, locale }: { recipe: Recipe; locale: string }) {
+function RecipeCard({
+  recipe, locale, isFavorite, onToggleFavorite,
+}: {
+  recipe: Recipe
+  locale: string
+  isFavorite: boolean
+  onToggleFavorite: (id: string, e: React.MouseEvent) => void
+}) {
   const totalTime = (recipe.prep_time_minutes ?? 0) + (recipe.cook_time_minutes ?? 0)
   return (
-    <Link href={`/${locale}/recepten/${recipe.id}`} className="bg-white rounded-2xl overflow-hidden border border-stone-100 hover:shadow-md transition-shadow">
+    <Link href={`/${locale}/recepten/${recipe.id}`} className="bg-white rounded-2xl overflow-hidden border border-stone-100 hover:shadow-md transition-shadow relative">
       {recipe.image_url ? (
         <div className="relative w-full h-28">
           <Image src={recipe.image_url} alt={recipe.title} fill className="object-cover" sizes="(max-width: 768px) 50vw, 200px" />
@@ -204,8 +235,16 @@ function RecipeCard({ recipe, locale }: { recipe: Recipe; locale: string }) {
       ) : (
         <div className="w-full h-28 bg-stone-100 flex items-center justify-center text-3xl">🍽️</div>
       )}
+      {/* Heart button */}
+      <button
+        onClick={e => onToggleFavorite(recipe.id, e)}
+        className="absolute top-2 right-2 w-7 h-7 bg-white/80 backdrop-blur-sm rounded-full flex items-center justify-center shadow-sm hover:scale-110 transition-transform"
+        aria-label={isFavorite ? 'Verwijder favoriet' : 'Voeg toe aan favorieten'}
+      >
+        <span className="text-base leading-none">{isFavorite ? '❤️' : '🤍'}</span>
+      </button>
       <div className="p-3">
-        <p className="font-medium text-sm leading-tight line-clamp-2">{recipe.title}</p>
+        <p className="font-medium text-sm leading-tight line-clamp-2 pr-1">{recipe.title}</p>
         <div className="flex items-center gap-2 mt-1.5">
           {recipe.cuisine && <span className="text-sm">{CUISINE_FLAGS[recipe.cuisine]}</span>}
           {totalTime > 0 && <span className="text-xs text-stone-400">{totalTime} min</span>}

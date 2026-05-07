@@ -6,7 +6,7 @@ import type { ShoppingItem } from '@/lib/types'
 import { predictExpiry } from '@/lib/expiry'
 import { useToast } from '@/components/Toast'
 
-// Supermarkt looproute — volgorde zoals in een echte winkel
+// Supermarkt looproute
 const CATEGORY_CONFIG: { name: string; icon: string }[] = [
   { name: 'Groente & fruit',         icon: '🥦' },
   { name: 'Brood & bakkerij',        icon: '🍞' },
@@ -20,7 +20,6 @@ const CATEGORY_CONFIG: { name: string; icon: string }[] = [
   { name: 'Persoonlijke verzorging', icon: '🧴' },
   { name: 'Overig',                  icon: '📦' },
 ]
-
 const CATEGORY_ICON = Object.fromEntries(CATEGORY_CONFIG.map(c => [c.name, c.icon]))
 const CATEGORIES = CATEGORY_CONFIG.map(c => c.name)
 
@@ -39,15 +38,43 @@ function categorize(name: string): string {
   return 'Overig'
 }
 
+const CACHE_KEY = 'boodschappen_cache'
+
 export default function BoodschappenClient({ initialItems }: { initialItems: ShoppingItem[] }) {
   const [items, setItems] = useState<ShoppingItem[]>(initialItems)
   const [newItem, setNewItem] = useState('')
   const [search, setSearch] = useState('')
   const [adding, setAdding] = useState(false)
+  const [isOffline, setIsOffline] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const toast = useToast()
   const undoTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
   const pendingDeletes = useRef<Map<string, ShoppingItem>>(new Map())
+
+  // Offline detectie
+  useEffect(() => {
+    setIsOffline(!navigator.onLine)
+    const goOnline = () => setIsOffline(false)
+    const goOffline = () => setIsOffline(true)
+    window.addEventListener('online', goOnline)
+    window.addEventListener('offline', goOffline)
+    return () => { window.removeEventListener('online', goOnline); window.removeEventListener('offline', goOffline) }
+  }, [])
+
+  // localStorage fallback: als server geen items gaf (offline cached page), laad uit cache
+  useEffect(() => {
+    if (initialItems.length === 0) {
+      try {
+        const raw = localStorage.getItem(CACHE_KEY)
+        if (raw) setItems(JSON.parse(raw))
+      } catch { /* ignore */ }
+    }
+  }, []) // eslint-disable-line
+
+  // Cache bijhouden bij elke wijziging
+  useEffect(() => {
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify(items)) } catch { /* ignore */ }
+  }, [items])
 
   // Realtime sync
   useEffect(() => {
@@ -57,7 +84,6 @@ export default function BoodschappenClient({ initialItems }: { initialItems: Sho
       .on('postgres_changes', { event: '*', schema: 'public', table: 'shopping_items' }, payload => {
         if (payload.eventType === 'INSERT') {
           const incoming = payload.new as ShoppingItem
-          // Skip if we just added this ourselves (pending delete guard)
           if (!pendingDeletes.current.has(incoming.id)) {
             setItems(prev => prev.some(i => i.id === incoming.id) ? prev : [...prev, incoming])
           }
@@ -75,17 +101,16 @@ export default function BoodschappenClient({ initialItems }: { initialItems: Sho
 
   async function addItem(e: React.FormEvent) {
     e.preventDefault()
-    if (!newItem.trim()) return
+    if (!newItem.trim() || isOffline) return
     setAdding(true)
     const supabase = createClient()
     const { data: profile } = await supabase.from('profiles').select('household_id').single()
-    const category = categorize(newItem)
     await supabase.from('shopping_items').insert({
       name: newItem.trim(),
       household_id: profile?.household_id,
       is_manual: true,
       checked: false,
-      category,
+      category: categorize(newItem),
     })
     setNewItem('')
     setAdding(false)
@@ -96,20 +121,29 @@ export default function BoodschappenClient({ initialItems }: { initialItems: Sho
     const supabase = createClient()
     const checked = !item.checked
     setItems(prev => prev.map(i => i.id === item.id ? { ...i, checked } : i))
-    await supabase.from('shopping_items').update({
-      checked,
-      checked_at: checked ? new Date().toISOString() : null,
-    }).eq('id', item.id)
+    if (!isOffline) {
+      await supabase.from('shopping_items').update({
+        checked,
+        checked_at: checked ? new Date().toISOString() : null,
+      }).eq('id', item.id)
+      if (checked && item.category !== 'Persoonlijke verzorging' && item.category !== 'Overig') {
+        const { data: profile } = await supabase.from('profiles').select('household_id').single()
+        await supabase.from('pantry_items').insert({
+          name: item.name,
+          quantity: item.quantity ?? 1,
+          unit: item.unit ?? 'stuks',
+          expires_at: predictExpiry(item.name),
+          household_id: profile?.household_id,
+        })
+      }
+    }
+  }
 
-    if (checked && item.category !== 'Persoonlijke verzorging' && item.category !== 'Overig') {
-      const { data: profile } = await supabase.from('profiles').select('household_id').single()
-      await supabase.from('pantry_items').insert({
-        name: item.name,
-        quantity: item.quantity ?? 1,
-        unit: item.unit ?? 'stuks',
-        expires_at: predictExpiry(item.name),
-        household_id: profile?.household_id,
-      })
+  async function updateItemQuantity(item: ShoppingItem, quantity: number) {
+    setItems(prev => prev.map(i => i.id === item.id ? { ...i, quantity } : i))
+    if (!isOffline) {
+      const supabase = createClient()
+      await supabase.from('shopping_items').update({ quantity }).eq('id', item.id)
     }
   }
 
@@ -131,11 +165,13 @@ export default function BoodschappenClient({ initialItems }: { initialItems: Sho
     toast(`${item.name} verwijderd`, 'info', { action: { label: 'Ongedaan maken', onClick: () => undoDelete(id) } })
     const timer = setTimeout(async () => {
       pendingDeletes.current.delete(item.id)
-      const supabase = createClient()
-      await supabase.from('shopping_items').delete().eq('id', item.id)
+      if (!isOffline) {
+        const supabase = createClient()
+        await supabase.from('shopping_items').delete().eq('id', item.id)
+      }
     }, 5000)
     undoTimers.current.set(item.id, timer)
-  }, [toast, undoDelete])
+  }, [toast, undoDelete, isOffline])
 
   function clearChecked() {
     items.filter(i => i.checked).forEach(item => deleteItem(item))
@@ -166,6 +202,14 @@ export default function BoodschappenClient({ initialItems }: { initialItems: Sho
         )}
       </div>
 
+      {/* Offline banner */}
+      {isOffline && (
+        <div className="bg-stone-800 text-white text-sm px-4 py-2.5 rounded-2xl flex items-center gap-2">
+          <span>📶</span>
+          <span>Je bent offline — gecachte lijst zichtbaar</span>
+        </div>
+      )}
+
       {/* Search */}
       <input
         type="search"
@@ -182,12 +226,13 @@ export default function BoodschappenClient({ initialItems }: { initialItems: Sho
           type="text"
           value={newItem}
           onChange={e => setNewItem(e.target.value)}
-          placeholder="Item toevoegen..."
-          className="flex-1 px-4 py-2.5 rounded-2xl border border-stone-200 bg-white text-sm outline-none focus:ring-2 focus:ring-orange-400"
+          placeholder={isOffline ? 'Offline — kan niet toevoegen' : 'Item toevoegen...'}
+          disabled={isOffline}
+          className="flex-1 px-4 py-2.5 rounded-2xl border border-stone-200 bg-white text-sm outline-none focus:ring-2 focus:ring-orange-400 disabled:opacity-50 disabled:cursor-not-allowed"
         />
         <button
           type="submit"
-          disabled={adding || !newItem.trim()}
+          disabled={adding || !newItem.trim() || isOffline}
           className="px-4 py-2.5 bg-orange-500 text-white text-sm rounded-2xl disabled:opacity-50 hover:bg-orange-600 transition-colors"
         >
           +
@@ -211,12 +256,16 @@ export default function BoodschappenClient({ initialItems }: { initialItems: Sho
               </div>
               <div className="space-y-1">
                 {grouped[category].map(item => (
-                  <ItemRow key={item.id} item={item} onToggle={toggleItem} onDelete={deleteItem} />
+                  <ItemRow
+                    key={item.id}
+                    item={item}
+                    onToggle={toggleItem}
+                    onDelete={deleteItem}
+                    onUpdateQuantity={updateItemQuantity}
+                  />
                 ))}
               </div>
-              {idx < sortedCategories.length - 1 && (
-                <div className="mt-4 border-t border-stone-100" />
-              )}
+              {idx < sortedCategories.length - 1 && <div className="mt-4 border-t border-stone-100" />}
             </div>
           ))}
 
@@ -229,7 +278,7 @@ export default function BoodschappenClient({ initialItems }: { initialItems: Sho
               </div>
               <div className="space-y-1 opacity-50">
                 {checked.map(item => (
-                  <ItemRow key={item.id} item={item} onToggle={toggleItem} onDelete={deleteItem} />
+                  <ItemRow key={item.id} item={item} onToggle={toggleItem} onDelete={deleteItem} onUpdateQuantity={updateItemQuantity} />
                 ))}
               </div>
             </div>
@@ -240,14 +289,31 @@ export default function BoodschappenClient({ initialItems }: { initialItems: Sho
   )
 }
 
-function ItemRow({ item, onToggle, onDelete }: {
+function ItemRow({ item, onToggle, onDelete, onUpdateQuantity }: {
   item: ShoppingItem
   onToggle: (item: ShoppingItem) => void
   onDelete: (item: ShoppingItem) => void
+  onUpdateQuantity: (item: ShoppingItem, qty: number) => void
 }) {
   const [offsetX, setOffsetX] = useState(0)
+  const [editingQty, setEditingQty] = useState(false)
+  const [qtyValue, setQtyValue] = useState(String(item.quantity ?? '1'))
   const startX = useRef(0)
   const isDragging = useRef(false)
+  const qtyRef = useRef<HTMLInputElement>(null)
+
+  function openQtyEdit(e: React.MouseEvent) {
+    e.stopPropagation()
+    setQtyValue(String(item.quantity ?? '1'))
+    setEditingQty(true)
+    setTimeout(() => { qtyRef.current?.focus(); qtyRef.current?.select() }, 30)
+  }
+
+  function saveQty() {
+    const num = parseFloat(qtyValue)
+    if (!isNaN(num) && num > 0) onUpdateQuantity(item, num)
+    setEditingQty(false)
+  }
 
   function onPointerDown(e: React.PointerEvent) {
     startX.current = e.clientX
@@ -262,11 +328,8 @@ function ItemRow({ item, onToggle, onDelete }: {
   }
 
   function onPointerUp() {
-    if (offsetX < -60) {
-      onDelete(item)
-    } else {
-      setOffsetX(0)
-    }
+    if (offsetX < -60) onDelete(item)
+    else setOffsetX(0)
   }
 
   return (
@@ -276,25 +339,48 @@ function ItemRow({ item, onToggle, onDelete }: {
       </div>
       <div
         className="relative flex items-center gap-3 bg-white px-3 py-2.5 border border-stone-100 rounded-xl text-left touch-pan-y"
-        style={{ transform: `translateX(${offsetX}px)`, transitionDuration: offsetX === 0 ? '200ms' : '0ms', transition: 'transform' }}
+        style={{ transform: `translateX(${offsetX}px)`, transition: `transform ${offsetX === 0 ? '200ms' : '0ms'}` }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerLeave={onPointerUp}
-        onClick={() => { if (!isDragging.current) onToggle(item) }}
+        onClick={() => { if (!isDragging.current && !editingQty) onToggle(item) }}
       >
         <div className={`w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
           item.checked ? 'bg-orange-500 border-orange-500' : 'border-stone-300'
         }`}>
           {item.checked && <span className="text-white text-xs">✓</span>}
         </div>
+
         <span className={`flex-1 text-sm ${item.checked ? 'line-through text-stone-400' : 'text-stone-800'}`}>
           {item.name}
         </span>
-        {(item.quantity || item.unit) && (
-          <span className="text-xs text-stone-400 flex-shrink-0">
-            {item.quantity ? (Number.isInteger(item.quantity) ? item.quantity : item.quantity.toFixed(1)) : ''} {item.unit}
-          </span>
+
+        {/* Tappable quantity badge */}
+        {editingQty ? (
+          <input
+            ref={qtyRef}
+            type="number"
+            value={qtyValue}
+            onChange={e => setQtyValue(e.target.value)}
+            onBlur={saveQty}
+            onKeyDown={e => { if (e.key === 'Enter') saveQty(); e.stopPropagation() }}
+            onClick={e => e.stopPropagation()}
+            className="w-16 text-xs text-center border border-orange-400 rounded-lg px-2 py-0.5 outline-none bg-orange-50"
+          />
+        ) : (
+          <button
+            onClick={openQtyEdit}
+            className={`text-xs px-2 py-0.5 rounded-full transition-colors flex-shrink-0 ${
+              item.quantity
+                ? 'text-stone-500 bg-stone-100 hover:bg-orange-100 hover:text-orange-600'
+                : 'text-stone-300 hover:text-orange-400'
+            }`}
+          >
+            {item.quantity
+              ? `${Number.isInteger(item.quantity) ? item.quantity : item.quantity.toFixed(1)}${item.unit ? ' ' + item.unit : ''}`
+              : '+ aantal'}
+          </button>
         )}
       </div>
     </div>

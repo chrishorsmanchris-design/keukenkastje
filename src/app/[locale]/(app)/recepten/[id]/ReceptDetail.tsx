@@ -37,7 +37,16 @@ export default function ReceptDetail({ recipe }: { recipe: Recipe }) {
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [notes, setNotes] = useState(recipe.notes ?? '')
   const [savingNotes, setSavingNotes] = useState(false)
+  const [isFavorite, setIsFavorite] = useState(recipe.is_favorite ?? false)
   const notesTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  async function toggleFavorite() {
+    const next = !isFavorite
+    setIsFavorite(next)
+    const supabase = createClient()
+    await supabase.from('recipes').update({ is_favorite: next }).eq('id', recipe.id)
+    toast(next ? '❤️ Toegevoegd aan favorieten' : 'Verwijderd uit favorieten')
+  }
 
   const ratio = servings / recipe.servings
 
@@ -149,6 +158,13 @@ export default function ReceptDetail({ recipe }: { recipe: Recipe }) {
             </div>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              onClick={toggleFavorite}
+              className="text-xl hover:scale-110 transition-transform"
+              aria-label={isFavorite ? 'Verwijder favoriet' : 'Voeg toe aan favorieten'}
+            >
+              {isFavorite ? '❤️' : '🤍'}
+            </button>
             <button onClick={shareRecipe} className="text-stone-400 text-lg">⬆️</button>
             <button onClick={() => router.push(`${window.location.pathname}/bewerken`)} className="text-stone-400 text-sm px-2 py-1 bg-stone-100 rounded-lg">Bewerken</button>
             <button onClick={() => router.back()} className="text-stone-400">✕</button>

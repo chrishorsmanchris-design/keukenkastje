@@ -19,6 +19,7 @@ export type Recipe = {
   ingredients: Ingredient[]
   steps: Step[]
   notes?: string
+  is_favorite?: boolean
   created_at: string
 }
 
