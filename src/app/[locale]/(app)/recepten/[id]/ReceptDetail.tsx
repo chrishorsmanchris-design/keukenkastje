@@ -285,8 +285,7 @@ function KookstandView({
     return () => { if (timerRef.current) clearInterval(timerRef.current) }
   }, [timerRunning])
 
-  // Reset timer when step changes
-  useEffect(() => { stopTimer() }, [activeStep])
+  // Timer blijft lopen bij stapwisseling
 
   const mins = secondsLeft !== null ? Math.floor(secondsLeft / 60) : 0
   const secs = secondsLeft !== null ? secondsLeft % 60 : 0
@@ -295,10 +294,21 @@ function KookstandView({
 
   return (
     <div className="min-h-screen bg-stone-900 text-white flex flex-col px-6 py-8">
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-4">
         <span className="text-stone-400 text-sm">{recipe.title}</span>
         <button onClick={onExit} className="text-stone-400 text-sm">Sluiten</button>
       </div>
+
+      {/* Mini-timer: loopt door als je naar andere stap gaat */}
+      {timerRunning && secondsLeft !== null && secondsLeft > 0 && !step.timer_minutes && (
+        <div className="bg-orange-500/20 border border-orange-500/40 rounded-2xl px-4 py-2 mb-4 flex items-center justify-between">
+          <span className="text-orange-300 text-sm">⏱ Timer loopt nog</span>
+          <span className="text-white font-bold tabular-nums text-sm">
+            {String(Math.floor(secondsLeft / 60)).padStart(2,'0')}:{String(secondsLeft % 60).padStart(2,'0')}
+          </span>
+          <button onClick={stopTimer} className="text-orange-300 text-xs ml-2">Stop</button>
+        </div>
+      )}
 
       <div className="flex gap-1 mb-8">
         {steps.map((_, i) => (

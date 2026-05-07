@@ -5,6 +5,23 @@ import { createClient } from '@/lib/supabase/client'
 import { predictExpiry } from '@/lib/expiry'
 import type { PantryItem } from '@/lib/types'
 
+function categorize(name: string): string {
+  const n = name.toLowerCase()
+  if (/melk|yoghurt|kwark|kaas|boter|room|slagroom|mozzarella|parmezaan|ricotta|creme fraiche|ei/.test(n)) return 'Zuivel & eieren'
+  if (/kip|rund|vark|gehakt|zalm|vis|garnaal|tonijn|spek|chorizo|ham|worst/.test(n)) return 'Vlees & vis'
+  if (/appel|peer|banaan|aardbei|tomaat|paprika|ui|knoflook|wortel|sla|spinazie|broccoli|courgette|aubergine|avocado|citroen|limoen|aardappel|venkel|komkommer/.test(n)) return 'Groente & fruit'
+  if (/brood|baguette|ciabatta|pita|tortilla|wrap|croissant/.test(n)) return 'Brood'
+  if (/pasta|spaghetti|penne|rijst|couscous|quinoa|noodle|meel|bloem/.test(n)) return 'Droog & graan'
+  if (/blik|pot|kikkererwt|linzen|boon|tomatenblok|kokosmelk|soep/.test(n)) return 'Blikken & potten'
+  if (/olie|azijn|sojasaus|tahini|pesto|mosterd|ketchup|mayonaise|saus/.test(n)) return 'Sauzen & oliën'
+  if (/zout|peper|komijn|kurkuma|oregano|basilicum|tijm|rozemarijn|paprikapoeder|kaneel|honing|suiker|vanille/.test(n)) return 'Kruiden & specerijen'
+  if (/water|sap|wijn|bier|cola|thee|koffie/.test(n)) return 'Dranken'
+  if (/diepvries|bevroren/.test(n)) return 'Diepvries'
+  return 'Overig'
+}
+
+const PANTRY_CATEGORIES = ['Zuivel & eieren','Vlees & vis','Groente & fruit','Brood','Droog & graan','Blikken & potten','Sauzen & oliën','Kruiden & specerijen','Dranken','Diepvries','Overig']
+
 function daysUntil(dateStr?: string): number | null {
   if (!dateStr) return null
   const diff = new Date(dateStr).getTime() - new Date().setHours(0,0,0,0)
@@ -149,43 +166,53 @@ export default function PantryClient({ initialItems }: { initialItems: PantryIte
         </div>
       )}
 
-      {/* Items list */}
+      {/* Items list grouped by category */}
       {items.length === 0 && scanned.length === 0 ? (
         <div className="text-center py-16 text-stone-400">
           <div className="text-4xl mb-3">🧺</div>
           <p className="text-sm">Je pantry is leeg</p>
           <p className="text-xs mt-1">Scan je koelkast of voeg producten handmatig toe</p>
         </div>
-      ) : (
-        <div className="space-y-2">
-          {items
-            .sort((a, b) => {
-              const da = daysUntil(a.expires_at) ?? 999
-              const db = daysUntil(b.expires_at) ?? 999
-              return da - db
-            })
-            .map(item => {
-              const days = daysUntil(item.expires_at)
-              const label = expiryLabel(days)
-              const rowClass =
-                days !== null && days < 0 ? 'bg-red-50 border-red-200' :
-                days !== null && days === 0 ? 'bg-red-50 border-red-200' :
-                days !== null && days <= 3 ? 'bg-orange-50 border-orange-200' :
-                days !== null && days <= 7 ? 'bg-yellow-50 border-yellow-200' :
-                'bg-white border-stone-100'
-              return (
-                <div key={item.id} className={`flex items-center gap-3 rounded-xl px-3 py-2.5 border transition-colors ${rowClass}`}>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{item.name}</p>
-                    <p className="text-xs text-stone-400">{item.quantity} {item.unit}</p>
-                  </div>
-                  {label && <span className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 ${label.color}`}>{label.text}</span>}
-                  <button onClick={() => removeItem(item.id)} className="text-stone-300 hover:text-red-400 transition-colors flex-shrink-0">✕</button>
+      ) : (() => {
+        const sorted = [...items].sort((a, b) => (daysUntil(a.expires_at) ?? 999) - (daysUntil(b.expires_at) ?? 999))
+        const grouped: Record<string, PantryItem[]> = {}
+        for (const item of sorted) {
+          const cat = categorize(item.name)
+          if (!grouped[cat]) grouped[cat] = []
+          grouped[cat].push(item)
+        }
+        return (
+          <div className="space-y-5">
+            {PANTRY_CATEGORIES.filter(c => grouped[c]?.length).map(cat => (
+              <div key={cat}>
+                <p className="text-xs font-semibold text-stone-400 uppercase tracking-wide mb-2">{cat}</p>
+                <div className="space-y-2">
+                  {grouped[cat].map(item => {
+                    const days = daysUntil(item.expires_at)
+                    const label = expiryLabel(days)
+                    const rowClass =
+                      days !== null && days < 0 ? 'bg-red-50 border-red-200' :
+                      days !== null && days === 0 ? 'bg-red-50 border-red-200' :
+                      days !== null && days <= 3 ? 'bg-orange-50 border-orange-200' :
+                      days !== null && days <= 7 ? 'bg-yellow-50 border-yellow-200' :
+                      'bg-white border-stone-100'
+                    return (
+                      <div key={item.id} className={`flex items-center gap-3 rounded-xl px-3 py-2.5 border transition-colors ${rowClass}`}>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">{item.name}</p>
+                          <p className="text-xs text-stone-400">{item.quantity} {item.unit}</p>
+                        </div>
+                        {label && <span className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 ${label.color}`}>{label.text}</span>}
+                        <button onClick={() => removeItem(item.id)} className="text-stone-300 hover:text-red-400 transition-colors flex-shrink-0">✕</button>
+                      </div>
+                    )
+                  })}
                 </div>
-              )
-            })}
-        </div>
-      )}
+              </div>
+            ))}
+          </div>
+        )
+      })()}
 
       {/* Add manually modal */}
       {showAdd && (

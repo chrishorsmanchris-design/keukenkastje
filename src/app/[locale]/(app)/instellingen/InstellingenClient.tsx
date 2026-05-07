@@ -113,8 +113,24 @@ export default function InstellingenClient({
     router.push('/nl/login')
   }
 
-  const hasPartner = members.length >= 2
+  const [copySuccess, setCopySuccess] = useState(false)
   const sourceIds = sources.map(s => s.name)
+
+  async function copyInviteLink() {
+    setInviting(true)
+    setInviteError('')
+    const res = await fetch('/api/invite', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: null }),
+    })
+    const data = await res.json()
+    if (!res.ok) { setInviteError(data.error); setInviting(false); return }
+    await navigator.clipboard.writeText(data.inviteUrl)
+    setCopySuccess(true)
+    setInviting(false)
+    setTimeout(() => setCopySuccess(false), 3000)
+  }
 
   return (
     <div className="px-4 pt-10 pb-8 space-y-6">
@@ -253,36 +269,49 @@ export default function InstellingenClient({
       </section>
 
       {/* Invite */}
-      {profile.is_owner && (
-        <section className="bg-white rounded-2xl border border-stone-100 p-4 space-y-3">
-          <h2 className="text-sm font-semibold text-stone-500 uppercase tracking-wide">Partner uitnodigen</h2>
-          {hasPartner ? (
-            <p className="text-sm text-stone-500">Je huishouden is compleet.</p>
-          ) : inviteSent ? (
-            <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-sm text-green-700">
-              ✓ Uitnodiging verstuurd naar {inviteEmail}
-            </div>
-          ) : (
-            <form onSubmit={sendInvite} className="space-y-2">
-              <input
-                type="email"
-                value={inviteEmail}
-                onChange={e => setInviteEmail(e.target.value)}
-                placeholder="E-mailadres partner"
-                className="w-full px-4 py-2.5 rounded-2xl border border-stone-200 text-sm outline-none focus:ring-2 focus:ring-orange-400"
-              />
-              {inviteError && <p className="text-red-500 text-xs">{inviteError}</p>}
-              <button
-                type="submit"
-                disabled={inviting || !inviteEmail}
-                className="w-full py-2.5 bg-orange-500 text-white text-sm rounded-2xl disabled:opacity-50 hover:bg-orange-600 transition-colors"
-              >
-                {inviting ? '...' : 'Uitnodiging versturen'}
-              </button>
-            </form>
-          )}
-        </section>
-      )}
+      <section className="bg-white rounded-2xl border border-stone-100 p-4 space-y-3">
+        <h2 className="text-sm font-semibold text-stone-500 uppercase tracking-wide">Iemand uitnodigen</h2>
+        <p className="text-xs text-stone-400">Deel een link of stuur een uitnodiging via e-mail. Iedereen met de link kan lid worden van jouw huishouden.</p>
+
+        {/* Link kopiëren */}
+        <button
+          onClick={copyInviteLink}
+          disabled={inviting}
+          className="w-full py-2.5 bg-stone-100 text-stone-700 text-sm rounded-2xl flex items-center justify-center gap-2 hover:bg-stone-200 transition-colors disabled:opacity-50"
+        >
+          {copySuccess ? '✓ Link gekopieerd!' : inviting ? '...' : '🔗 Kopieer uitnodigingslink'}
+        </button>
+
+        <div className="flex items-center gap-2 text-xs text-stone-400">
+          <div className="flex-1 h-px bg-stone-100" />
+          <span>of via e-mail</span>
+          <div className="flex-1 h-px bg-stone-100" />
+        </div>
+
+        {inviteSent ? (
+          <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-sm text-green-700">
+            ✓ Uitnodiging verstuurd naar {inviteEmail}
+          </div>
+        ) : (
+          <form onSubmit={sendInvite} className="space-y-2">
+            <input
+              type="email"
+              value={inviteEmail}
+              onChange={e => setInviteEmail(e.target.value)}
+              placeholder="E-mailadres"
+              className="w-full px-4 py-2.5 rounded-2xl border border-stone-200 text-sm outline-none focus:ring-2 focus:ring-orange-400"
+            />
+            {inviteError && <p className="text-red-500 text-xs">{inviteError}</p>}
+            <button
+              type="submit"
+              disabled={inviting || !inviteEmail}
+              className="w-full py-2.5 bg-orange-500 text-white text-sm rounded-2xl disabled:opacity-50 hover:bg-orange-600 transition-colors"
+            >
+              {inviting ? '...' : 'Uitnodiging versturen'}
+            </button>
+          </form>
+        )}
+      </section>
 
       <button
         onClick={logout}

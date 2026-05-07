@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { ShoppingItem } from '@/lib/types'
 import { predictExpiry } from '@/lib/expiry'
+import { useToast } from '@/components/Toast'
 
 const CATEGORIES = [
   'Groente & fruit', 'Vlees & vis', 'Zuivel & eieren', 'Brood & bakkerij',
@@ -32,6 +33,9 @@ export default function BoodschappenClient({ initialItems }: { initialItems: Sho
   const [search, setSearch] = useState('')
   const [adding, setAdding] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const toast = useToast()
+  const undoTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  const pendingDeletes = useRef<Map<string, ShoppingItem>>(new Map())
 
   // Real-time sync
   useEffect(() => {
@@ -92,17 +96,33 @@ export default function BoodschappenClient({ initialItems }: { initialItems: Sho
     }
   }
 
-  const deleteItem = useCallback(async (item: ShoppingItem) => {
-    setItems(prev => prev.filter(i => i.id !== item.id))
-    const supabase = createClient()
-    await supabase.from('shopping_items').delete().eq('id', item.id)
+  const undoDelete = useCallback((itemId: string) => {
+    const timer = undoTimers.current.get(itemId)
+    if (timer) clearTimeout(timer)
+    undoTimers.current.delete(itemId)
+    const item = pendingDeletes.current.get(itemId)
+    if (item) {
+      pendingDeletes.current.delete(itemId)
+      setItems(prev => [...prev, item].sort((a, b) => a.created_at.localeCompare(b.created_at)))
+    }
   }, [])
 
-  async function clearChecked() {
-    const supabase = createClient()
-    const checkedIds = items.filter(i => i.checked).map(i => i.id)
-    setItems(prev => prev.filter(i => !i.checked))
-    await supabase.from('shopping_items').delete().in('id', checkedIds)
+  const deleteItem = useCallback((item: ShoppingItem) => {
+    setItems(prev => prev.filter(i => i.id !== item.id))
+    pendingDeletes.current.set(item.id, item)
+    const id = item.id
+    toast(`${item.name} verwijderd`, 'info', { action: { label: 'Ongedaan maken', onClick: () => undoDelete(id) } })
+    const timer = setTimeout(async () => {
+      pendingDeletes.current.delete(item.id)
+      const supabase = createClient()
+      await supabase.from('shopping_items').delete().eq('id', item.id)
+    }, 5000)
+    undoTimers.current.set(item.id, timer)
+  }, [toast, undoDelete])
+
+  function clearChecked() {
+    const checkedItems = items.filter(i => i.checked)
+    checkedItems.forEach(item => deleteItem(item))
   }
 
   // Group by category, unchecked first

@@ -33,10 +33,17 @@ export async function POST(req: NextRequest) {
         },
         {
           type: 'text',
-          text: `Identify all food products visible in this fridge or pantry photo.
+          text: `Identify food products that are CLEARLY and UNAMBIGUOUSLY visible in this photo. Be conservative — when in doubt, leave it out.
+
+Rules:
+- Only include products you can identify with high confidence (>80%)
+- Include a confidence score (0.0–1.0) for each product
+- Use Dutch product names, keep them simple (e.g. "Melk", "Kaas", "Paprika")
+- Do NOT guess products that are partially hidden or blurry
+- Do NOT invent products that aren't visible
+
 Return ONLY valid JSON array:
-[{"name": "product name in Dutch", "quantity": number, "unit": "stuks|liter|kg|gram|etc"}]
-Only include clearly visible products. Keep names simple (e.g. "Melk", "Kaas", "Paprika").`,
+[{"name": "string", "quantity": number, "unit": "stuks|liter|kg|gram", "confidence": number}]`,
         },
       ],
     }],
@@ -48,8 +55,10 @@ Only include clearly visible products. Keep names simple (e.g. "Melk", "Kaas", "
   const match = content.text.match(/\[[\s\S]*\]/)
   if (!match) return NextResponse.json({ products: [] })
 
-  const products = JSON.parse(match[0]) as { name: string; quantity: number; unit: string }[]
-  const withExpiry = products.map(p => ({ ...p, expires_at: predictExpiry(p.name) }))
+  const raw = JSON.parse(match[0]) as { name: string; quantity: number; unit: string; confidence?: number }[]
+  // Filter out low-confidence guesses
+  const products = raw.filter(p => (p.confidence ?? 1) >= 0.75)
+  const withExpiry = products.map(({ confidence: _c, ...p }) => ({ ...p, expires_at: predictExpiry(p.name) }))
 
   return NextResponse.json({ products: withExpiry })
 }
