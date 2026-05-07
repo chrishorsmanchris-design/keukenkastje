@@ -1,22 +1,22 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { predictExpiry } from '@/lib/expiry'
 import type { PantryItem } from '@/lib/types'
 
 function categorize(name: string): string {
   const n = name.toLowerCase()
-  if (/melk|yoghurt|kwark|kaas|boter|room|slagroom|mozzarella|parmezaan|ricotta|creme fraiche|ei/.test(n)) return 'Zuivel & eieren'
-  if (/kip|rund|vark|gehakt|zalm|vis|garnaal|tonijn|spek|chorizo|ham|worst/.test(n)) return 'Vlees & vis'
-  if (/appel|peer|banaan|aardbei|tomaat|paprika|ui|knoflook|wortel|sla|spinazie|broccoli|courgette|aubergine|avocado|citroen|limoen|aardappel|venkel|komkommer/.test(n)) return 'Groente & fruit'
-  if (/brood|baguette|ciabatta|pita|tortilla|wrap|croissant/.test(n)) return 'Brood'
-  if (/pasta|spaghetti|penne|rijst|couscous|quinoa|noodle|meel|bloem/.test(n)) return 'Droog & graan'
-  if (/blik|pot|kikkererwt|linzen|boon|tomatenblok|kokosmelk|soep/.test(n)) return 'Blikken & potten'
-  if (/olie|azijn|sojasaus|tahini|pesto|mosterd|ketchup|mayonaise|saus/.test(n)) return 'Sauzen & oliën'
-  if (/zout|peper|komijn|kurkuma|oregano|basilicum|tijm|rozemarijn|paprikapoeder|kaneel|honing|suiker|vanille/.test(n)) return 'Kruiden & specerijen'
-  if (/water|sap|wijn|bier|cola|thee|koffie/.test(n)) return 'Dranken'
-  if (/diepvries|bevroren/.test(n)) return 'Diepvries'
+  if (/melk|yoghurt|kwark|kaas|boter|room|slagroom|mozzarella|parmezaan|ricotta|creme fraiche|crème fraîche|feta|halloumi|brie|camembert|gouda|edam|ei\b|eieren/.test(n)) return 'Zuivel & eieren'
+  if (/\bkip\b|kipfilet|kipdi|kippen|rund|biefstuk|gehakt|vark|spek|bacon|ham|worst|salami|chorizo|zalm|vis\b|kabeljauw|tilapia|garnaal|tonijn|makreel|haring|forel|inktvis|mosselen|oesters/.test(n)) return 'Vlees & vis'
+  if (/appel|peer|banaan|aardbei|framboos|bosbes|mango|ananas|meloen|druif|kers|pruim|abrikoos|perzik|vijg|tomaat|paprika|\bui\b|uien|knoflook|wortel|sla\b|sla,|spinazie|broccoli|courgette|aubergine|avocado|citroen|limoen|sinaasappel|grapefruit|aardappel|zoete aardappel|venkel|komkommer|prei|selderij|witlof|radijs|biet|mais|erwtjes|boontjes|asperge|artisjok|kool|spruitjes|paddenstoel|champignon|portobello|courgetti/.test(n)) return 'Groente & fruit'
+  if (/brood|baguette|ciabatta|pita|tortilla|wrap|croissant|bagel|brioche|focaccia|stokbrood|beschuit|crackers|knäckebröd/.test(n)) return 'Brood'
+  if (/pasta|spaghetti|penne|fusilli|rigatoni|tagliatelle|lasagne|gnocchi|rijst|couscous|quinoa|bulgur|noodle|mie\b|meel|bloem|havermout|granola|muesli|cornflakes|polenta|griesmeel/.test(n)) return 'Droog & graan'
+  if (/blik|pot\b|potje|kikkererwt|linzen|kidneyboon|boon\b|bonen|tomatenblok|gezeefde tomaten|tomatenpuree|kokosmelk|ingeblikte|conserven|augurk|kappertjes|olijven/.test(n)) return 'Blikken & potten'
+  if (/olijfolie|zonnebloemolie|kokosolie|sesamolie|\bolie\b|azijn|balsamico|sojasaus|teriyaki|vissaus|worcestershire|tahini|hummus|pesto|mosterd|ketchup|mayonaise|sriracha|sambal|tabasco|hoisin|ketjap|saus\b/.test(n)) return 'Sauzen & oliën'
+  if (/kruiden|specerij|kruid\b|\bzout\b|zeezout|peper\b|peperkorrel|komijn|kurkuma|kerrie|curry|oregano|basilicum|tijm|rozemarijn|paprikapoeder|cayenne|chilipoeder|kaneel|nootmuskaat|kardemom|koriander|korianderzaad|laurier|dille|peterselie|bieslook|munt|salie|dragon|venkelzaad|karwij|anijs|steranijs|kruidnagel|piment|gember|sumak|za'atar|ras el hanout|garam masala|5-kruidenpoeder|gemalen|poeder|gedroogd|italiaanse|provençaal|mixed herbs|bouillon|honing|suiker|vanille|bakpoeder|baking soda|maizena|gelatine/.test(n)) return 'Kruiden & specerijen'
+  if (/water|bronwater|spa|frisdrank|sap\b|sinaasappelsap|appelsap|tomatensap|wijn|rode wijn|witte wijn|bier|cola|fanta|sprite|thee|groene thee|koffie|espresso|cappuccino|chocolademelk|limonade/.test(n)) return 'Dranken'
+  if (/diepvries|bevroren|ingevroren|frozen/.test(n)) return 'Diepvries'
   return 'Overig'
 }
 
@@ -103,6 +103,12 @@ export default function PantryClient({ initialItems }: { initialItems: PantryIte
     await supabase.from('pantry_items').delete().eq('id', id)
   }
 
+  const changeCategory = useCallback(async (id: string, category: string) => {
+    setItems(prev => prev.map(i => i.id === id ? { ...i, category } : i))
+    const supabase = createClient()
+    await supabase.from('pantry_items').update({ category }).eq('id', id)
+  }, [])
+
   return (
     <div className="px-4 pt-10 pb-4 space-y-4">
       <div className="flex items-center justify-between">
@@ -177,7 +183,7 @@ export default function PantryClient({ initialItems }: { initialItems: PantryIte
         const sorted = [...items].sort((a, b) => (daysUntil(a.expires_at) ?? 999) - (daysUntil(b.expires_at) ?? 999))
         const grouped: Record<string, PantryItem[]> = {}
         for (const item of sorted) {
-          const cat = categorize(item.name)
+          const cat = item.category ?? categorize(item.name)
           if (!grouped[cat]) grouped[cat] = []
           grouped[cat].push(item)
         }
@@ -197,14 +203,14 @@ export default function PantryClient({ initialItems }: { initialItems: PantryIte
                       days !== null && days <= 7 ? 'bg-yellow-50 border-yellow-200' :
                       'bg-white border-stone-100'
                     return (
-                      <div key={item.id} className={`flex items-center gap-3 rounded-xl px-3 py-2.5 border transition-colors ${rowClass}`}>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">{item.name}</p>
-                          <p className="text-xs text-stone-400">{item.quantity} {item.unit}</p>
-                        </div>
-                        {label && <span className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 ${label.color}`}>{label.text}</span>}
-                        <button onClick={() => removeItem(item.id)} className="text-stone-300 hover:text-red-400 transition-colors flex-shrink-0">✕</button>
-                      </div>
+                      <PantryRow
+                        key={item.id}
+                        item={item}
+                        rowClass={rowClass}
+                        label={label}
+                        onRemove={removeItem}
+                        onChangeCategory={changeCategory}
+                      />
                     )
                   })}
                 </div>
@@ -250,6 +256,58 @@ export default function PantryClient({ initialItems }: { initialItems: PantryIte
               </button>
             </div>
           </form>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function PantryRow({ item, rowClass, label, onRemove, onChangeCategory }: {
+  item: PantryItem
+  rowClass: string
+  label: { text: string; color: string } | null
+  onRemove: (id: string) => void
+  onChangeCategory: (id: string, category: string) => void
+}) {
+  const [showPicker, setShowPicker] = useState(false)
+  const currentCat = item.category ?? categorize(item.name)
+
+  return (
+    <div className={`rounded-xl border transition-colors ${rowClass}`}>
+      <div className="flex items-center gap-3 px-3 py-2.5">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium truncate">{item.name}</p>
+          <p className="text-xs text-stone-400">{item.quantity} {item.unit}</p>
+        </div>
+        {label && <span className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 ${label.color}`}>{label.text}</span>}
+        <button
+          onClick={() => setShowPicker(p => !p)}
+          className="text-xs text-stone-300 hover:text-stone-500 flex-shrink-0 px-1"
+          title="Categorie wijzigen"
+        >
+          ⋯
+        </button>
+        <button onClick={() => onRemove(item.id)} className="text-stone-300 hover:text-red-400 transition-colors flex-shrink-0">✕</button>
+      </div>
+
+      {showPicker && (
+        <div className="px-3 pb-3">
+          <p className="text-xs text-stone-400 mb-2">Verplaats naar categorie:</p>
+          <div className="flex flex-wrap gap-1.5">
+            {PANTRY_CATEGORIES.map(cat => (
+              <button
+                key={cat}
+                onClick={() => { onChangeCategory(item.id, cat); setShowPicker(false) }}
+                className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                  cat === currentCat
+                    ? 'bg-orange-500 text-white border-orange-500'
+                    : 'bg-white text-stone-600 border-stone-200 hover:border-orange-300'
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
         </div>
       )}
     </div>

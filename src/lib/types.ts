@@ -29,6 +29,7 @@ export type PantryItem = {
   quantity: number
   unit?: string
   expires_at?: string
+  category?: string
   created_at: string
 }
 
