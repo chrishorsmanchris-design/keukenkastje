@@ -13,8 +13,13 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
   const { locale } = await params
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  const { data: profile } = await supabase.from('profiles').select('display_name').eq('id', user!.id).single()
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('display_name, household:households(name)')
+    .eq('id', user!.id)
+    .single()
   const name = profile?.display_name?.split(' ')[0] ?? ''
+  const householdName = (profile?.household as { name?: string } | null)?.name ?? ''
   const greeting = getGreeting()
 
   return (
@@ -22,7 +27,11 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-semibold">{greeting}{name ? `, ${name}` : ''} 👋</h1>
-          <p className="text-stone-500 text-sm mt-1">Wat kook je vanavond?</p>
+          {householdName ? (
+            <p className="text-stone-500 text-sm mt-1">🏠 {householdName}</p>
+          ) : (
+            <p className="text-stone-500 text-sm mt-1">Wat kook je vanavond?</p>
+          )}
         </div>
         <Link href={`/${locale}/instellingen`} className="w-9 h-9 rounded-full bg-stone-100 flex items-center justify-center text-stone-500 hover:bg-stone-200 transition-colors">
           ⚙️

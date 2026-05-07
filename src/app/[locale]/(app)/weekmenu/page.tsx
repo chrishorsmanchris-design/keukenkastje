@@ -17,6 +17,14 @@ export default async function WeekmenuPage() {
   const supabase = await createClient()
   const dates = getWeekDates()
 
+  // Haal alle huishoudenleden op
+  const { data: profile } = await supabase.from('profiles').select('household_id').single()
+  const { data: householdMembers } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('household_id', profile?.household_id)
+  const memberIds = (householdMembers ?? []).map(m => m.id)
+
   const [{ data: menuItems }, { data: recipes }] = await Promise.all([
     supabase
       .from('week_menu')
@@ -25,7 +33,8 @@ export default async function WeekmenuPage() {
       .eq('meal_type', 'dinner'),
     supabase
       .from('recipes')
-      .select('id, title, image_url, cuisine, servings')
+      .select('id, title, image_url, cuisine, servings, user_id')
+      .in('user_id', memberIds.length ? memberIds : ['none'])
       .order('title'),
   ])
 

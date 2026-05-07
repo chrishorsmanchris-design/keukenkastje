@@ -4,6 +4,7 @@ export type Step = { order: number; text: string; timer_minutes?: number }
 export type Recipe = {
   id: string
   household_id: string
+  user_id?: string
   title: string
   description?: string
   image_url?: string

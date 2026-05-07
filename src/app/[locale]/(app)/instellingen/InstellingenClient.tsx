@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 
-type Profile = { household_id: string; display_name: string; is_owner: boolean; locale: string; household: { name: string } }
+type Profile = { household_id: string; display_name: string; is_owner: boolean; locale: string; household: { name: string } | null }
 type Member = { id: string; display_name: string; is_owner: boolean }
 type Source = { id: string; name: string; url?: string; type: 'website' | 'cookbook' | 'instagram' }
 
@@ -114,7 +114,18 @@ export default function InstellingenClient({
   }
 
   const [copySuccess, setCopySuccess] = useState(false)
+  const [householdName, setHouseholdName] = useState(profile.household?.name ?? '')
+  const [savingHousehold, setSavingHousehold] = useState(false)
   const sourceIds = sources.map(s => s.name)
+
+  async function saveHouseholdName(e: React.FormEvent) {
+    e.preventDefault()
+    if (!householdName.trim()) return
+    setSavingHousehold(true)
+    const supabase = createClient()
+    await supabase.from('households').update({ name: householdName.trim() }).eq('id', profile.household_id)
+    setSavingHousehold(false)
+  }
 
   async function copyInviteLink() {
     setInviting(true)
@@ -254,7 +265,18 @@ export default function InstellingenClient({
       {/* Household */}
       <section className="bg-white rounded-2xl border border-stone-100 p-4 space-y-3">
         <h2 className="text-sm font-semibold text-stone-500 uppercase tracking-wide">Huishouden</h2>
-        <p className="font-medium">{profile.household?.name}</p>
+        <form onSubmit={saveHouseholdName} className="flex gap-2">
+          <input
+            type="text"
+            value={householdName}
+            onChange={e => setHouseholdName(e.target.value)}
+            placeholder="Naam van het huishouden"
+            className="flex-1 px-4 py-2.5 rounded-2xl border border-stone-200 text-sm outline-none focus:ring-2 focus:ring-orange-400"
+          />
+          <button type="submit" disabled={savingHousehold || !householdName.trim()} className="px-4 py-2.5 bg-orange-500 text-white text-sm rounded-2xl disabled:opacity-50">
+            {savingHousehold ? '...' : 'Opslaan'}
+          </button>
+        </form>
         <div className="space-y-2">
           {members.map(m => (
             <div key={m.id} className="flex items-center gap-2 text-sm">

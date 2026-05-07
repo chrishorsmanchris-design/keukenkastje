@@ -81,10 +81,14 @@ export default function NieuwReceptPage() {
   async function handleSave() {
     setSaving(true)
     const supabase = createClient()
-    const { data: profile } = await supabase.from('profiles').select('household_id').single()
+    const [{ data: profile }, { data: { user } }] = await Promise.all([
+      supabase.from('profiles').select('household_id').single(),
+      supabase.auth.getUser(),
+    ])
     const { data, error } = await supabase.from('recipes').insert({
       ...form,
       household_id: profile?.household_id,
+      user_id: user!.id,
     }).select().single()
     if (!error && data && pendingPhoto) {
       const fd = new FormData()
