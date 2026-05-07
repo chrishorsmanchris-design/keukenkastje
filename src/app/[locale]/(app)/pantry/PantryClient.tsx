@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { predictExpiry } from '@/lib/expiry'
 import type { PantryItem } from '@/lib/types'
@@ -47,6 +47,24 @@ export default function PantryClient({ initialItems }: { initialItems: PantryIte
   const [saving, setSaving] = useState(false)
   const [newItem, setNewItem] = useState({ name: '', quantity: 1, unit: 'stuks' })
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // Realtime sync
+  useEffect(() => {
+    const supabase = createClient()
+    const channel = supabase
+      .channel('pantry')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pantry_items' }, payload => {
+        if (payload.eventType === 'INSERT') {
+          setItems(prev => prev.some(i => i.id === payload.new.id) ? prev : [...prev, payload.new as PantryItem])
+        } else if (payload.eventType === 'UPDATE') {
+          setItems(prev => prev.map(i => i.id === payload.new.id ? payload.new as PantryItem : i))
+        } else if (payload.eventType === 'DELETE') {
+          setItems(prev => prev.filter(i => i.id !== payload.old.id))
+        }
+      })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [])
 
   const expiringSoon = items.filter(i => { const d = daysUntil(i.expires_at); return d !== null && d <= 3 })
 

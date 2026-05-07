@@ -103,7 +103,16 @@ export default function ReceptDetail({ recipe }: { recipe: Recipe }) {
   }
 
   if (kookstand) {
-    return <KookstandView recipe={recipe} activeStep={activeStep} setActiveStep={setActiveStep} onExit={() => setKookstand(false)} />
+    return (
+      <KookstandView
+        recipe={recipe}
+        activeStep={activeStep}
+        setActiveStep={setActiveStep}
+        onExit={() => setKookstand(false)}
+        servings={servings}
+        onServingsChange={setServings}
+      />
+    )
   }
 
   return (
@@ -241,12 +250,14 @@ export default function ReceptDetail({ recipe }: { recipe: Recipe }) {
 }
 
 function KookstandView({
-  recipe, activeStep, setActiveStep, onExit,
+  recipe, activeStep, setActiveStep, onExit, servings, onServingsChange,
 }: {
   recipe: Recipe
   activeStep: number
   setActiveStep: (n: number) => void
   onExit: () => void
+  servings: number
+  onServingsChange: (n: number) => void
 }) {
   const steps = recipe.steps as { order: number; text: string; timer_minutes?: number }[]
   const step = steps[activeStep]
@@ -254,6 +265,15 @@ function KookstandView({
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null)
   const [timerRunning, setTimerRunning] = useState(false)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [showIngredients, setShowIngredients] = useState(false)
+
+  const ratio = servings / recipe.servings
+  function scaleAmount(amount: string): string {
+    const num = parseFloat(amount)
+    if (isNaN(num)) return amount
+    const scaled = num * ratio
+    return scaled % 1 === 0 ? scaled.toString() : scaled.toFixed(1)
+  }
 
   function startTimer() {
     if (!step.timer_minutes) return
@@ -294,9 +314,34 @@ function KookstandView({
 
   return (
     <div className="min-h-screen bg-stone-900 text-white flex flex-col px-6 py-8">
+      {/* Header */}
       <div className="flex items-center justify-between mb-4">
-        <span className="text-stone-400 text-sm">{recipe.title}</span>
-        <button onClick={onExit} className="text-stone-400 text-sm">Sluiten</button>
+        <div className="flex-1 min-w-0">
+          <span className="text-stone-400 text-sm truncate block">{recipe.title}</span>
+        </div>
+        <div className="flex items-center gap-3 flex-shrink-0">
+          {/* Personen aanpassen */}
+          <div className="flex items-center gap-2 bg-stone-800 rounded-full px-3 py-1">
+            <button
+              onClick={() => onServingsChange(Math.max(1, servings - 1))}
+              className="w-5 h-5 flex items-center justify-center text-stone-400 hover:text-white"
+            >−</button>
+            <span className="text-xs font-medium tabular-nums">{servings}p</span>
+            <button
+              onClick={() => onServingsChange(servings + 1)}
+              className="w-5 h-5 flex items-center justify-center text-stone-400 hover:text-white"
+            >+</button>
+          </div>
+          {/* Ingrediënten */}
+          <button
+            onClick={() => setShowIngredients(true)}
+            className="text-stone-400 hover:text-white text-sm transition-colors"
+            title="Ingrediënten bekijken"
+          >
+            📋
+          </button>
+          <button onClick={onExit} className="text-stone-400 text-sm">Sluiten</button>
+        </div>
       </div>
 
       {/* Mini-timer: loopt door als je naar andere stap gaat */}
@@ -389,6 +434,48 @@ function KookstandView({
           {isLast ? '✓ Klaar' : 'Volgende →'}
         </button>
       </div>
+
+      {/* Ingrediënten bottom sheet */}
+      {showIngredients && (
+        <div
+          className="fixed inset-0 bg-black/70 z-50 flex items-end"
+          onClick={() => setShowIngredients(false)}
+        >
+          <div
+            className="bg-stone-800 w-full rounded-t-3xl p-6 max-h-[70vh] flex flex-col"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-semibold text-white">Ingrediënten</h2>
+              <div className="flex items-center gap-3">
+                {/* Personen inline */}
+                <div className="flex items-center gap-2 bg-stone-700 rounded-full px-3 py-1">
+                  <button
+                    onClick={() => onServingsChange(Math.max(1, servings - 1))}
+                    className="w-5 h-5 flex items-center justify-center text-stone-400 hover:text-white"
+                  >−</button>
+                  <span className="text-xs font-medium text-white tabular-nums">{servings} personen</span>
+                  <button
+                    onClick={() => onServingsChange(servings + 1)}
+                    className="w-5 h-5 flex items-center justify-center text-stone-400 hover:text-white"
+                  >+</button>
+                </div>
+                <button onClick={() => setShowIngredients(false)} className="text-stone-400">✕</button>
+              </div>
+            </div>
+            <div className="overflow-y-auto space-y-2">
+              {(recipe.ingredients as Ingredient[]).map((ing, i) => (
+                <div key={i} className="flex justify-between text-sm border-b border-stone-700 pb-2">
+                  <span className="text-stone-200">{ing.name}</span>
+                  <span className="text-orange-300 font-medium tabular-nums">
+                    {scaleAmount(ing.amount)} {ing.unit}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

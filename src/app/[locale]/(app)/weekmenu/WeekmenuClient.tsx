@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useEffect } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
@@ -50,6 +50,35 @@ export default function WeekmenuClient({
   )
 
   const today = new Date().toISOString().split('T')[0]
+
+  // Realtime sync — huisgenoten zien elkaars wijzigingen direct
+  useEffect(() => {
+    const supabase = createClient()
+    const channel = supabase
+      .channel('weekmenu')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'week_menu' }, async payload => {
+        if (payload.eventType === 'INSERT') {
+          const { data } = await supabase
+            .from('week_menu')
+            .select('*, recipe:recipes(*)')
+            .eq('id', payload.new.id)
+            .single()
+          if (data) setMenu(prev => prev.some(m => m.id === data.id) ? prev : [...prev, data as MenuItem])
+        } else if (payload.eventType === 'UPDATE') {
+          const { data } = await supabase
+            .from('week_menu')
+            .select('*, recipe:recipes(*)')
+            .eq('id', payload.new.id)
+            .single()
+          if (data) setMenu(prev => prev.map(m => m.id === data.id ? data as MenuItem : m))
+        } else if (payload.eventType === 'DELETE') {
+          setMenu(prev => prev.filter(m => m.id !== payload.old.id))
+        }
+      })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [])
+
   const menuByDate = Object.fromEntries(menu.map(m => [m.date, m]))
 
   function toggleSelected(date: string) {

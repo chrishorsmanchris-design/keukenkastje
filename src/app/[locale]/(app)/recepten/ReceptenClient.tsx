@@ -14,18 +14,50 @@ const CUISINE_FLAGS: Record<string, string> = {
   'Nederlands': '🇳🇱', 'Mexicaans': '🇲🇽', 'Frans': '🇫🇷', 'Amerikaans': '🇺🇸',
 }
 
+const TIME_FILTERS = [
+  { label: '≤ 20 min', value: 20 },
+  { label: '≤ 30 min', value: 30 },
+  { label: '≤ 45 min', value: 45 },
+]
+
+type SortOption = 'az' | 'nieuwst' | 'snelst'
+
 export default function ReceptenClient({ recipes }: { recipes: Recipe[] }) {
   const { locale } = useParams()
   const [search, setSearch] = useState('')
   const [filterCuisine, setFilterCuisine] = useState('')
   const [filterType, setFilterType] = useState('')
+  const [filterTime, setFilterTime] = useState<number | null>(null)
+  const [sortBy, setSortBy] = useState<SortOption>('az')
 
-  const filtered = recipes.filter(r => {
-    const matchSearch = r.title.toLowerCase().includes(search.toLowerCase())
-    const matchCuisine = !filterCuisine || r.cuisine === filterCuisine
-    const matchType = !filterType || r.ingredient_type === filterType
-    return matchSearch && matchCuisine && matchType
-  })
+  const activeFilterCount = [filterCuisine, filterType, filterTime].filter(Boolean).length
+
+  function clearAll() {
+    setFilterCuisine('')
+    setFilterType('')
+    setFilterTime(null)
+    setSearch('')
+  }
+
+  const filtered = recipes
+    .filter(r => {
+      const matchSearch = r.title.toLowerCase().includes(search.toLowerCase())
+      const matchCuisine = !filterCuisine || r.cuisine === filterCuisine
+      const matchType = !filterType || r.ingredient_type === filterType
+      const totalTime = (r.prep_time_minutes ?? 0) + (r.cook_time_minutes ?? 0)
+      const matchTime = !filterTime || totalTime === 0 || totalTime <= filterTime
+      return matchSearch && matchCuisine && matchType && matchTime
+    })
+    .sort((a, b) => {
+      if (sortBy === 'az') return a.title.localeCompare(b.title, 'nl')
+      if (sortBy === 'nieuwst') return b.created_at.localeCompare(a.created_at)
+      if (sortBy === 'snelst') {
+        const ta = (a.prep_time_minutes ?? 0) + (a.cook_time_minutes ?? 0)
+        const tb = (b.prep_time_minutes ?? 0) + (b.cook_time_minutes ?? 0)
+        return (ta || 9999) - (tb || 9999)
+      }
+      return 0
+    })
 
   return (
     <div className="px-4 pt-10 pb-4 space-y-4">
@@ -39,6 +71,7 @@ export default function ReceptenClient({ recipes }: { recipes: Recipe[] }) {
         </Link>
       </div>
 
+      {/* Search */}
       <input
         type="search"
         placeholder="Zoek recepten..."
@@ -47,6 +80,27 @@ export default function ReceptenClient({ recipes }: { recipes: Recipe[] }) {
         className="w-full px-4 py-2.5 rounded-2xl border border-stone-200 bg-white text-sm outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent"
       />
 
+      {/* Sort */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-stone-400 flex-shrink-0">Sorteer:</span>
+        <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
+          {([['az', 'A–Z'], ['nieuwst', 'Nieuwste'], ['snelst', 'Snelste']] as [SortOption, string][]).map(([val, label]) => (
+            <button
+              key={val}
+              onClick={() => setSortBy(val)}
+              className={`flex-shrink-0 text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                sortBy === val
+                  ? 'bg-stone-800 text-white border-stone-800'
+                  : 'bg-white text-stone-600 border-stone-200'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Type filter */}
       <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
         {TYPES.map(t => (
           <button
@@ -63,6 +117,7 @@ export default function ReceptenClient({ recipes }: { recipes: Recipe[] }) {
         ))}
       </div>
 
+      {/* Cuisine filter */}
       <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
         {CUISINES.map(c => (
           <button
@@ -79,20 +134,60 @@ export default function ReceptenClient({ recipes }: { recipes: Recipe[] }) {
         ))}
       </div>
 
+      {/* Time filter */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-stone-400 flex-shrink-0">Tijd:</span>
+        <div className="flex gap-1.5">
+          {TIME_FILTERS.map(({ label, value }) => (
+            <button
+              key={value}
+              onClick={() => setFilterTime(filterTime === value ? null : value)}
+              className={`flex-shrink-0 text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                filterTime === value
+                  ? 'bg-blue-500 text-white border-blue-500'
+                  : 'bg-white text-stone-600 border-stone-200'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {activeFilterCount > 0 && (
+          <button
+            onClick={clearAll}
+            className="ml-auto text-xs text-stone-400 hover:text-red-400 transition-colors flex-shrink-0"
+          >
+            Wis filters ({activeFilterCount})
+          </button>
+        )}
+      </div>
+
+      {/* Results */}
       {filtered.length === 0 ? (
         <div className="text-center py-16 text-stone-400">
           <div className="text-4xl mb-3">📖</div>
-          <p className="text-sm">Nog geen recepten</p>
-          <Link href={`/${locale}/recepten/nieuw`} className="text-orange-500 text-sm mt-2 inline-block">
-            Voeg je eerste recept toe
-          </Link>
+          <p className="text-sm">
+            {recipes.length === 0 ? 'Nog geen recepten' : 'Geen recepten gevonden'}
+          </p>
+          {recipes.length === 0 ? (
+            <Link href={`/${locale}/recepten/nieuw`} className="text-orange-500 text-sm mt-2 inline-block">
+              Voeg je eerste recept toe
+            </Link>
+          ) : activeFilterCount > 0 ? (
+            <button onClick={clearAll} className="text-orange-500 text-sm mt-2">
+              Filters wissen
+            </button>
+          ) : null}
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3">
-          {filtered.map(recipe => (
-            <RecipeCard key={recipe.id} recipe={recipe} locale={locale as string} />
-          ))}
-        </div>
+        <>
+          <p className="text-xs text-stone-400">{filtered.length} recept{filtered.length !== 1 ? 'en' : ''}</p>
+          <div className="grid grid-cols-2 gap-3">
+            {filtered.map(recipe => (
+              <RecipeCard key={recipe.id} recipe={recipe} locale={locale as string} />
+            ))}
+          </div>
+        </>
       )}
     </div>
   )

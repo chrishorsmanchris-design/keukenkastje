@@ -6,24 +6,36 @@ import type { ShoppingItem } from '@/lib/types'
 import { predictExpiry } from '@/lib/expiry'
 import { useToast } from '@/components/Toast'
 
-const CATEGORIES = [
-  'Groente & fruit', 'Vlees & vis', 'Zuivel & eieren', 'Brood & bakkerij',
-  'Pasta & rijst', 'Blikken & potten', 'Sauzen & kruiden', 'Dranken',
-  'Diepvries', 'Persoonlijke verzorging', 'Overig',
+// Supermarkt looproute — volgorde zoals in een echte winkel
+const CATEGORY_CONFIG: { name: string; icon: string }[] = [
+  { name: 'Groente & fruit',         icon: '🥦' },
+  { name: 'Brood & bakkerij',        icon: '🍞' },
+  { name: 'Vlees & vis',             icon: '🥩' },
+  { name: 'Zuivel & eieren',         icon: '🥛' },
+  { name: 'Pasta & rijst',           icon: '🍝' },
+  { name: 'Blikken & potten',        icon: '🥫' },
+  { name: 'Sauzen & kruiden',        icon: '🫙' },
+  { name: 'Dranken',                 icon: '🥤' },
+  { name: 'Diepvries',               icon: '❄️' },
+  { name: 'Persoonlijke verzorging', icon: '🧴' },
+  { name: 'Overig',                  icon: '📦' },
 ]
+
+const CATEGORY_ICON = Object.fromEntries(CATEGORY_CONFIG.map(c => [c.name, c.icon]))
+const CATEGORIES = CATEGORY_CONFIG.map(c => c.name)
 
 function categorize(name: string): string {
   const n = name.toLowerCase()
-  if (/tomaat|paprika|ui|knoflook|wortel|sla|spinazie|broccoli|courgette|aubergine|avocado|citroen|limoen|appel|peer|banaan|aardappel|zoete aardappel|venkel/.test(n)) return 'Groente & fruit'
-  if (/kip|rund|vark|gehakt|zalm|vis|garnaal|tonijn|spek|chorizo/.test(n)) return 'Vlees & vis'
-  if (/melk|kaas|boter|room|yoghurt|kwark|ei|mozzarella|parmezaan|ricotta|creme fraiche/.test(n)) return 'Zuivel & eieren'
-  if (/brood|baguette|ciabatta|pita|tortilla|wrap/.test(n)) return 'Brood & bakkerij'
-  if (/pasta|spaghetti|penne|tagliatelle|rijst|couscous|quinoa|noodle/.test(n)) return 'Pasta & rijst'
-  if (/blik|pot|kikkererwt|linzen|boon|tomatenblok|kokosmelk/.test(n)) return 'Blikken & potten'
-  if (/olie|azijn|sojasaus|tahini|harissa|pesto|mosterd|ketchup|zout|peper|komijn|kurkuma|oregano|basilicum|tijm|rozemarijn|paprikapoeder|kaneel|honing|suiker|bloem/.test(n)) return 'Sauzen & kruiden'
-  if (/water|sap|wijn|bier|cola|thee|koffie/.test(n)) return 'Dranken'
+  if (/tomaat|paprika|\bui\b|uien|knoflook|wortel|sla\b|spinazie|broccoli|courgette|aubergine|avocado|citroen|limoen|appel|peer|banaan|aardappel|zoete aardappel|venkel|komkommer|prei|champignon|paddenstoel/.test(n)) return 'Groente & fruit'
+  if (/kip|rund|vark|gehakt|zalm|vis\b|garnaal|tonijn|spek|chorizo|bacon|ham|worst/.test(n)) return 'Vlees & vis'
+  if (/melk|kaas|boter|room|yoghurt|kwark|ei\b|eieren|mozzarella|parmezaan|ricotta|creme fraiche|feta/.test(n)) return 'Zuivel & eieren'
+  if (/brood|baguette|ciabatta|pita|tortilla|wrap|bagel|stokbrood/.test(n)) return 'Brood & bakkerij'
+  if (/pasta|spaghetti|penne|tagliatelle|rijst|couscous|quinoa|noodle|mie\b|bloem|havermout/.test(n)) return 'Pasta & rijst'
+  if (/blik|pot\b|kikkererwt|linzen|boon\b|bonen|tomatenblok|kokosmelk|olijven/.test(n)) return 'Blikken & potten'
+  if (/olie|azijn|sojasaus|tahini|pesto|mosterd|ketchup|zout|peper\b|komijn|kurkuma|oregano|basilicum|tijm|rozemarijn|kaneel|honing|suiker/.test(n)) return 'Sauzen & kruiden'
+  if (/water|sap\b|wijn|bier|cola|thee|koffie/.test(n)) return 'Dranken'
   if (/diepvries|bevroren/.test(n)) return 'Diepvries'
-  if (/shampoo|zeep|tandpasta|wasmiddel|schoonmaak|toilet|kaarsen|tissues/.test(n)) return 'Persoonlijke verzorging'
+  if (/shampoo|zeep|tandpasta|wasmiddel|schoonmaak|toilet|tissues/.test(n)) return 'Persoonlijke verzorging'
   return 'Overig'
 }
 
@@ -37,18 +49,24 @@ export default function BoodschappenClient({ initialItems }: { initialItems: Sho
   const undoTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
   const pendingDeletes = useRef<Map<string, ShoppingItem>>(new Map())
 
-  // Real-time sync
+  // Realtime sync
   useEffect(() => {
     const supabase = createClient()
     const channel = supabase
       .channel('shopping')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'shopping_items' }, payload => {
         if (payload.eventType === 'INSERT') {
-          setItems(prev => [...prev, payload.new as ShoppingItem])
+          const incoming = payload.new as ShoppingItem
+          // Skip if we just added this ourselves (pending delete guard)
+          if (!pendingDeletes.current.has(incoming.id)) {
+            setItems(prev => prev.some(i => i.id === incoming.id) ? prev : [...prev, incoming])
+          }
         } else if (payload.eventType === 'UPDATE') {
           setItems(prev => prev.map(i => i.id === payload.new.id ? payload.new as ShoppingItem : i))
         } else if (payload.eventType === 'DELETE') {
-          setItems(prev => prev.filter(i => i.id !== payload.old.id))
+          if (!pendingDeletes.current.has(payload.old.id)) {
+            setItems(prev => prev.filter(i => i.id !== payload.old.id))
+          }
         }
       })
       .subscribe()
@@ -83,7 +101,6 @@ export default function BoodschappenClient({ initialItems }: { initialItems: Sho
       checked_at: checked ? new Date().toISOString() : null,
     }).eq('id', item.id)
 
-    // Add to pantry when checked (only food items)
     if (checked && item.category !== 'Persoonlijke verzorging' && item.category !== 'Overig') {
       const { data: profile } = await supabase.from('profiles').select('household_id').single()
       await supabase.from('pantry_items').insert({
@@ -121,18 +138,18 @@ export default function BoodschappenClient({ initialItems }: { initialItems: Sho
   }, [toast, undoDelete])
 
   function clearChecked() {
-    const checkedItems = items.filter(i => i.checked)
-    checkedItems.forEach(item => deleteItem(item))
+    items.filter(i => i.checked).forEach(item => deleteItem(item))
   }
 
-  // Group by category, unchecked first
-  const filtered = search.trim() ? items.filter(i => i.name.toLowerCase().includes(search.toLowerCase())) : items
+  const filtered = search.trim()
+    ? items.filter(i => i.name.toLowerCase().includes(search.toLowerCase()))
+    : items
   const unchecked = filtered.filter(i => !i.checked)
   const checked = filtered.filter(i => i.checked)
 
   const grouped: Record<string, ShoppingItem[]> = {}
   for (const item of unchecked) {
-    const cat = item.category ?? 'Overig'
+    const cat = item.category ?? categorize(item.name)
     if (!grouped[cat]) grouped[cat] = []
     grouped[cat].push(item)
   }
@@ -185,20 +202,31 @@ export default function BoodschappenClient({ initialItems }: { initialItems: Sho
         </div>
       ) : (
         <div className="space-y-5">
-          {sortedCategories.map(category => (
+          {sortedCategories.map((category, idx) => (
             <div key={category}>
-              <p className="text-xs font-semibold text-stone-400 uppercase tracking-wide mb-2">{category}</p>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-base leading-none">{CATEGORY_ICON[category]}</span>
+                <p className="text-xs font-semibold text-stone-500 uppercase tracking-wide">{category}</p>
+                <span className="text-xs text-stone-300 ml-auto">{grouped[category].length}</span>
+              </div>
               <div className="space-y-1">
                 {grouped[category].map(item => (
                   <ItemRow key={item.id} item={item} onToggle={toggleItem} onDelete={deleteItem} />
                 ))}
               </div>
+              {idx < sortedCategories.length - 1 && (
+                <div className="mt-4 border-t border-stone-100" />
+              )}
             </div>
           ))}
 
           {checked.length > 0 && (
             <div>
-              <p className="text-xs font-semibold text-stone-300 uppercase tracking-wide mb-2">Afgevinkt</p>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-base leading-none">✅</span>
+                <p className="text-xs font-semibold text-stone-300 uppercase tracking-wide">Afgevinkt</p>
+                <span className="text-xs text-stone-300 ml-auto">{checked.length}</span>
+              </div>
               <div className="space-y-1 opacity-50">
                 {checked.map(item => (
                   <ItemRow key={item.id} item={item} onToggle={toggleItem} onDelete={deleteItem} />
@@ -247,8 +275,8 @@ function ItemRow({ item, onToggle, onDelete }: {
         <span className="text-white text-sm font-medium">Wis</span>
       </div>
       <div
-        className="relative flex items-center gap-3 bg-white px-3 py-2.5 border border-stone-100 rounded-xl text-left touch-pan-y transition-transform"
-        style={{ transform: `translateX(${offsetX}px)`, transitionDuration: offsetX === 0 ? '200ms' : '0ms' }}
+        className="relative flex items-center gap-3 bg-white px-3 py-2.5 border border-stone-100 rounded-xl text-left touch-pan-y"
+        style={{ transform: `translateX(${offsetX}px)`, transitionDuration: offsetX === 0 ? '200ms' : '0ms', transition: 'transform' }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}

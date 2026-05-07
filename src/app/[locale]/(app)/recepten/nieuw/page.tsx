@@ -148,15 +148,23 @@ export default function NieuwReceptPage() {
         </div>
 
         {/* Kookboek scan */}
-        <label className="col-span-2 cursor-pointer">
-          <div className={`bg-stone-100 rounded-2xl p-4 flex items-center gap-3 hover:bg-stone-200 transition-colors ${scanning ? 'opacity-60' : ''}`}>
-            <span className="text-2xl">📖</span>
-            <div>
+        <label className={`col-span-2 ${scanning ? 'cursor-wait' : 'cursor-pointer'}`}>
+          <div className={`bg-stone-100 rounded-2xl p-4 flex items-center gap-3 transition-colors ${scanning ? '' : 'hover:bg-stone-200'}`}>
+            <span className="text-2xl">{scanning ? '⏳' : '📖'}</span>
+            <div className="flex-1">
               <p className="text-sm font-medium text-stone-700">
-                {scanning ? 'Recept scannen...' : 'Scan kookboekpagina'}
+                {scanning ? 'Bezig met scannen...' : 'Scan kookboekpagina'}
               </p>
-              <p className="text-xs text-stone-400">Maak een foto of kies een afbeelding</p>
+              <p className="text-xs text-stone-400">
+                {scanning ? 'Claude leest het recept uit de foto' : 'Maak een foto of kies een afbeelding'}
+              </p>
             </div>
+            {scanning && (
+              <svg className="animate-spin w-5 h-5 text-orange-500 flex-shrink-0" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+              </svg>
+            )}
           </div>
           {scanError && <p className="text-red-500 text-xs mt-1 px-1">{scanError}</p>}
           <input
@@ -171,21 +179,35 @@ export default function NieuwReceptPage() {
       </div>
 
       {/* Photo */}
-      <label className="relative block cursor-pointer">
+      <label className={`relative block ${scanning ? 'cursor-wait' : 'cursor-pointer'}`}>
         {photoPreview ? (
-          <img src={photoPreview} alt="" className="w-full h-48 object-cover rounded-2xl" />
+          <div className="relative">
+            <img src={photoPreview} alt="" className={`w-full h-48 object-cover rounded-2xl transition-all ${scanning ? 'brightness-50' : ''}`} />
+            {scanning && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 rounded-2xl">
+                <svg className="animate-spin w-8 h-8 text-white" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                </svg>
+                <div className="text-center">
+                  <p className="text-white text-sm font-medium">Claude leest het recept…</p>
+                  <p className="text-white/70 text-xs mt-0.5">Dit duurt 10–20 seconden</p>
+                </div>
+              </div>
+            )}
+          </div>
         ) : (
           <div className="w-full h-32 bg-stone-100 rounded-2xl flex flex-col items-center justify-center gap-1 text-stone-400 hover:bg-stone-200 transition-colors">
             <span className="text-2xl">📷</span>
             <span className="text-xs">Foto toevoegen</span>
           </div>
         )}
-        {photoPreview && (
+        {photoPreview && !scanning && (
           <div className="absolute inset-0 bg-black/0 hover:bg-black/20 rounded-2xl transition-colors flex items-center justify-center">
             <span className="opacity-0 hover:opacity-100 text-white text-xs bg-black/50 px-3 py-1 rounded-full transition-opacity">📷 Wijzigen</span>
           </div>
         )}
-        <input type="file" accept="image/*" className="hidden" onChange={handlePhotoSelect} />
+        <input type="file" accept="image/*" className="hidden" onChange={handlePhotoSelect} disabled={scanning} />
       </label>
 
       {/* Title */}
