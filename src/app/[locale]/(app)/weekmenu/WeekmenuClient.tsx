@@ -5,10 +5,25 @@ import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 
-const DAYS_NL = ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag']
 const CUISINE_FLAGS: Record<string, string> = {
   'Italiaans': '🇮🇹', 'Midden-Oosters': '🫙', 'Aziatisch': '🇯🇵',
   'Nederlands': '🇳🇱', 'Mexicaans': '🇲🇽', 'Frans': '🇫🇷', 'Amerikaans': '🇺🇸',
+}
+
+const DAY_NAMES = ['Zondag', 'Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag']
+
+function getDayLabel(dateStr: string, todayStr: string): string {
+  if (dateStr === todayStr) return 'Vandaag'
+  const d = new Date(dateStr + 'T12:00:00')
+  const tomorrow = new Date(todayStr + 'T12:00:00')
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  if (d.toDateString() === tomorrow.toDateString()) return 'Morgen'
+  return DAY_NAMES[d.getDay()]
+}
+
+function getShortDate(dateStr: string): string {
+  const d = new Date(dateStr + 'T12:00:00')
+  return `${d.getDate()}/${d.getMonth() + 1}`
 }
 
 type Recipe = { id: string; title: string; image_url?: string; cuisine?: string; servings: number }
@@ -25,13 +40,26 @@ export default function WeekmenuClient({
   const { locale } = useParams()
   const [menu, setMenu] = useState<MenuItem[]>(menuItems)
   const [picker, setPicker] = useState<string | null>(null)
-  const [moving, setMoving] = useState<string | null>(null) // date being moved
+  const [moving, setMoving] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [generating, setGenerating] = useState(false)
-  const [isPending, startTransition] = useTransition()
+  const [, startTransition] = useTransition()
+  const [selectedDates, setSelectedDates] = useState<Set<string>>(
+    () => new Set(menuItems.filter(m => m.recipe).map(m => m.date))
+  )
 
+  const today = new Date().toISOString().split('T')[0]
   const menuByDate = Object.fromEntries(menu.map(m => [m.date, m]))
+
+  function toggleSelected(date: string) {
+    setSelectedDates(prev => {
+      const next = new Set(prev)
+      if (next.has(date)) next.delete(date)
+      else next.add(date)
+      return next
+    })
+  }
 
   async function assignRecipe(date: string, recipe: Recipe) {
     const supabase = createClient()
@@ -48,6 +76,7 @@ export default function WeekmenuClient({
       }).select('*, recipe:recipes(*)').single()
       if (data) setMenu(m => [...m, data])
     }
+    setSelectedDates(prev => new Set([...prev, date]))
     setPicker(null)
     setSearch('')
   }
@@ -58,6 +87,7 @@ export default function WeekmenuClient({
     if (!item) return
     await supabase.from('week_menu').delete().eq('id', item.id)
     setMenu(m => m.filter(x => x.date !== date))
+    setSelectedDates(prev => { const next = new Set(prev); next.delete(date); return next })
   }
 
   async function updateServings(date: string, servings: number) {
@@ -75,6 +105,9 @@ export default function WeekmenuClient({
     const toItem = menuByDate[toDate]
     if (!fromItem) { setMoving(null); return }
 
+    const fromSelected = selectedDates.has(fromDate)
+    const toSelected = selectedDates.has(toDate)
+
     if (toItem) {
       // Swap the two recipes
       await Promise.all([
@@ -86,10 +119,22 @@ export default function WeekmenuClient({
         if (x.date === toDate) return { ...x, recipe: fromItem.recipe }
         return x
       }))
+      // Mirror selection state in the swap
+      setSelectedDates(prev => {
+        const next = new Set(prev)
+        if (toItem.recipe && fromSelected) next.add(toDate); else next.delete(toDate)
+        if (fromItem.recipe && toSelected) next.add(fromDate); else next.delete(fromDate)
+        return next
+      })
     } else {
       // Move to empty day
       await supabase.from('week_menu').update({ date: toDate }).eq('id', fromItem.id)
       setMenu(m => m.map(x => x.date === fromDate ? { ...x, date: toDate } : x))
+      setSelectedDates(prev => {
+        const next = new Set(prev)
+        if (next.has(fromDate)) { next.delete(fromDate); next.add(toDate) }
+        return next
+      })
     }
     setMoving(null)
   }
@@ -100,14 +145,12 @@ export default function WeekmenuClient({
     const { data: profile } = await supabase.from('profiles').select('household_id').single()
     const householdId = profile?.household_id
 
-    // Get full recipe data for planned items
-    const planned = menu.filter(m => m.recipe)
+    const planned = menu.filter(m => m.recipe && selectedDates.has(m.date))
     const recipeIds = planned.map(m => m.recipe!.id)
     const { data: fullRecipes } = await supabase.from('recipes').select('id, ingredients, servings').in('id', recipeIds)
 
     const recipeMap = Object.fromEntries((fullRecipes ?? []).map(r => [r.id, r]))
 
-    // Build shopping items
     const items: { name: string; quantity: number; unit: string; recipe_id: string }[] = []
     for (const m of planned) {
       const full = recipeMap[m.recipe!.id]
@@ -119,7 +162,6 @@ export default function WeekmenuClient({
       }
     }
 
-    // Merge duplicates by name
     const merged: Record<string, typeof items[0]> = {}
     for (const item of items) {
       const key = item.name.toLowerCase()
@@ -127,7 +169,6 @@ export default function WeekmenuClient({
       else merged[key] = { ...item }
     }
 
-    // Clear existing non-manual items and insert new ones
     await supabase.from('shopping_items').delete().eq('household_id', householdId).eq('is_manual', false)
     await supabase.from('shopping_items').insert(
       Object.values(merged).map(item => ({ ...item, household_id: householdId, is_manual: false, checked: false }))
@@ -138,7 +179,7 @@ export default function WeekmenuClient({
   }
 
   const filteredRecipes = recipes.filter(r => r.title.toLowerCase().includes(search.toLowerCase()))
-  const today = new Date().toISOString().split('T')[0]
+  const selectedCount = [...selectedDates].filter(d => menuByDate[d]?.recipe).length
 
   return (
     <div className="px-4 pt-10 pb-4 space-y-4">
@@ -149,10 +190,10 @@ export default function WeekmenuClient({
         </div>
         <button
           onClick={generateShoppingList}
-          disabled={generating || menu.filter(m => m.recipe).length === 0}
+          disabled={generating || selectedCount === 0}
           className="bg-orange-500 text-white text-sm font-medium px-4 py-2 rounded-full hover:bg-orange-600 transition-colors disabled:opacity-40"
         >
-          {generating ? '...' : '🛒 Boodschappen'}
+          {generating ? '...' : `🛒 ${selectedCount > 0 ? `${selectedCount} recept${selectedCount !== 1 ? 'en' : ''}` : 'Boodschappen'}`}
         </button>
       </div>
 
@@ -164,11 +205,15 @@ export default function WeekmenuClient({
       )}
 
       <div className="space-y-2">
-        {dates.map((date, i) => {
+        {dates.map((date) => {
           const item = menuByDate[date]
           const isToday = date === today
           const isMoving = moving === date
           const isDropTarget = moving && moving !== date && dragOver === date
+          const isSelected = selectedDates.has(date)
+          const dayLabel = getDayLabel(date, today)
+          const shortDate = getShortDate(date)
+
           return (
             <div
               key={date}
@@ -190,14 +235,38 @@ export default function WeekmenuClient({
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className={`text-sm font-medium ${isToday ? 'text-orange-600' : 'text-stone-500'}`}>
-                    {DAYS_NL[i]}
+                    {dayLabel}
                   </span>
+                  {!isToday && <span className="text-xs text-stone-300">{shortDate}</span>}
                   {isToday && <span className="text-xs bg-orange-500 text-white px-2 py-0.5 rounded-full">Vandaag</span>}
                 </div>
                 {item?.recipe && !moving && (
                   <div className="flex items-center gap-2">
-                    <button onClick={e => { e.stopPropagation(); setMoving(date) }} className="text-stone-300 hover:text-orange-400 text-sm px-1">⇄</button>
-                    <button onClick={e => { e.stopPropagation(); removeDay(date) }} className="text-stone-300 hover:text-red-400 text-sm">✕</button>
+                    {/* Checkbox: include in shopping list */}
+                    <button
+                      onClick={e => { e.stopPropagation(); toggleSelected(date) }}
+                      title={isSelected ? 'Verwijder uit selectie' : 'Voeg toe aan selectie'}
+                      className={`w-5 h-5 rounded flex items-center justify-center text-xs border-2 transition-colors flex-shrink-0 ${
+                        isSelected
+                          ? 'bg-orange-500 border-orange-500 text-white'
+                          : 'border-stone-300 text-transparent hover:border-orange-300'
+                      }`}
+                    >
+                      ✓
+                    </button>
+                    <button
+                      onClick={e => { e.stopPropagation(); setMoving(date) }}
+                      title="Verplaatsen"
+                      className="text-stone-300 hover:text-orange-400 text-sm px-1"
+                    >
+                      ⇄
+                    </button>
+                    <button
+                      onClick={e => { e.stopPropagation(); removeDay(date) }}
+                      className="text-stone-300 hover:text-red-400 text-sm"
+                    >
+                      ✕
+                    </button>
                   </div>
                 )}
               </div>
@@ -213,12 +282,15 @@ export default function WeekmenuClient({
                     <div className="min-w-0">
                       <p className="text-sm font-medium truncate">{item.recipe.title}</p>
                       {item.recipe.cuisine && (
-                        <p className="text-xs text-stone-400">{CUISINE_FLAGS[item.recipe.cuisine]} {item.recipe.cuisine}</p>
+                        <p className="text-xs text-stone-400">{CUISINE_FLAGS[item.recipe.cuisine] ?? ''} {item.recipe.cuisine}</p>
                       )}
                     </div>
                   </div>
                   {!moving && (
-                    <div className="flex items-center gap-2 bg-stone-100 rounded-full px-2 py-1 flex-shrink-0" onClick={e => e.stopPropagation()}>
+                    <div
+                      className="flex items-center gap-2 bg-stone-100 rounded-full px-2 py-1 flex-shrink-0"
+                      onClick={e => e.stopPropagation()}
+                    >
                       <button onClick={() => updateServings(date, Math.max(1, item.servings - 1))} className="w-5 h-5 flex items-center justify-center text-sm">−</button>
                       <span className="text-xs font-medium w-3 text-center">{item.servings}</span>
                       <button onClick={() => updateServings(date, item.servings + 1)} className="w-5 h-5 flex items-center justify-center text-sm">+</button>
@@ -270,7 +342,7 @@ export default function WeekmenuClient({
                   )}
                   <div>
                     <p className="text-sm font-medium">{recipe.title}</p>
-                    {recipe.cuisine && <p className="text-xs text-stone-400">{CUISINE_FLAGS[recipe.cuisine]} {recipe.cuisine}</p>}
+                    {recipe.cuisine && <p className="text-xs text-stone-400">{CUISINE_FLAGS[recipe.cuisine] ?? ''} {recipe.cuisine}</p>}
                   </div>
                 </button>
               ))}
