@@ -1,49 +1,72 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 
 export default function JoinClient({ token, householdName, locale }: { token: string; householdName: string; locale: string }) {
-  const router = useRouter()
   const [joining, setJoining] = useState(false)
   const [error, setError] = useState('')
 
   async function handleJoin() {
     setJoining(true)
+    setError('')
     const supabase = createClient()
 
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { setError('Niet ingelogd'); setJoining(false); return }
+    if (!user) { setError('Niet ingelogd — log eerst in.'); setJoining(false); return }
 
     const { data: invite } = await supabase
       .from('invites')
       .select('household_id')
       .eq('token', token)
-      .eq('accepted', false)
       .single()
 
-    if (!invite) { setError('Uitnodiging niet meer geldig'); setJoining(false); return }
+    if (!invite) { setError('Uitnodiging ongeldig.'); setJoining(false); return }
 
-    // Get current (auto-created) household to delete later
-    const { data: currentProfile } = await supabase.from('profiles').select('household_id').eq('id', user.id).single()
+    // Al lid van dit huishouden
+    const { data: currentProfile } = await supabase
+      .from('profiles').select('household_id').eq('id', user.id).single()
     const oldHouseholdId = currentProfile?.household_id
 
-    // Join the new household
-    await supabase.from('profiles').update({
-      household_id: invite.household_id,
-      is_owner: false,
-    }).eq('id', user.id)
+    if (oldHouseholdId === invite.household_id) {
+      window.location.href = `/${locale}`
+      return
+    }
 
-    // Mark invite accepted
+    // Join: upsert zodat het werkt óók als er nog geen profielrij bestaat
+    const { error: upsertError } = await supabase
+      .from('profiles')
+      .upsert(
+        { id: user.id, household_id: invite.household_id, is_owner: false },
+        { onConflict: 'id' }
+      )
+
+    if (upsertError) {
+      setError(`Aanmelden mislukt: ${upsertError.message}`)
+      setJoining(false)
+      return
+    }
+
+    // Verify dat de upsert écht is doorgekomen
+    const { data: updatedProfile } = await supabase
+      .from('profiles').select('household_id').eq('id', user.id).single()
+
+    if (updatedProfile?.household_id !== invite.household_id) {
+      setError('Aanmelden mislukt: profiel kon niet worden bijgewerkt. Controleer de INSERT/UPDATE policies op de profiles tabel.')
+      setJoining(false)
+      return
+    }
+
+    // Uitnodiging markeren als gebruikt
     await supabase.from('invites').update({ accepted: true }).eq('token', token)
 
-    // Delete the auto-created empty household
+    // Leeg oud huishouden verwijderen
     if (oldHouseholdId && oldHouseholdId !== invite.household_id) {
       await supabase.from('households').delete().eq('id', oldHouseholdId)
     }
 
-    router.push(`/${locale}`)
+    // Volledige reload zodat server fresh household-data ophaalt
+    window.location.href = `/${locale}`
   }
 
   return (
