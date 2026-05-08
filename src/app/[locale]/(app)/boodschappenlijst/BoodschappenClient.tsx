@@ -40,7 +40,7 @@ function categorize(name: string): string {
 
 const CACHE_KEY = 'boodschappen_cache'
 
-export default function BoodschappenClient({ initialItems }: { initialItems: ShoppingItem[] }) {
+export default function BoodschappenClient({ initialItems, householdId }: { initialItems: ShoppingItem[]; householdId: string }) {
   const [items, setItems] = useState<ShoppingItem[]>(initialItems)
   const [newItem, setNewItem] = useState('')
   const [search, setSearch] = useState('')
@@ -76,12 +76,17 @@ export default function BoodschappenClient({ initialItems }: { initialItems: Sho
     try { localStorage.setItem(CACHE_KEY, JSON.stringify(items)) } catch { /* ignore */ }
   }, [items])
 
-  // Realtime sync
+  // Realtime sync — filter op household zodat beide gebruikers elkaars wijzigingen zien
   useEffect(() => {
     const supabase = createClient()
     const channel = supabase
-      .channel('shopping')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'shopping_items' }, payload => {
+      .channel(`shopping:${householdId}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'shopping_items',
+        filter: `household_id=eq.${householdId}`,
+      }, payload => {
         if (payload.eventType === 'INSERT') {
           const incoming = payload.new as ShoppingItem
           if (!pendingDeletes.current.has(incoming.id)) {
@@ -97,24 +102,42 @@ export default function BoodschappenClient({ initialItems }: { initialItems: Sho
       })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [])
+  }, [householdId])
 
   async function addItem(e: React.FormEvent) {
     e.preventDefault()
     if (!newItem.trim() || isOffline) return
     setAdding(true)
     const supabase = createClient()
-    const { data: profile } = await supabase.from('profiles').select('household_id').single()
-    await supabase.from('shopping_items').insert({
-      name: newItem.trim(),
-      household_id: profile?.household_id,
+
+    const name = newItem.trim()
+    const category = categorize(name)
+    const tempId = `temp-${Date.now()}`
+    const optimistic: ShoppingItem = {
+      id: tempId, name, category, household_id: householdId,
+      is_manual: true, checked: false, created_at: new Date().toISOString(),
+    }
+    setItems(prev => [...prev, optimistic])
+    setNewItem('')
+    inputRef.current?.focus()
+
+    const { data, error } = await supabase.from('shopping_items').insert({
+      name,
+      household_id: householdId,
       is_manual: true,
       checked: false,
-      category: categorize(newItem),
-    })
-    setNewItem('')
+      category,
+    }).select().single()
+
+    if (error || !data) {
+      // Terugdraaien bij fout
+      setItems(prev => prev.filter(i => i.id !== tempId))
+      toast(`Kon ${name} niet toevoegen`, 'error')
+    } else {
+      // Vervang tijdelijk item door echte row
+      setItems(prev => prev.map(i => i.id === tempId ? data as ShoppingItem : i))
+    }
     setAdding(false)
-    inputRef.current?.focus()
   }
 
   async function toggleItem(item: ShoppingItem) {
