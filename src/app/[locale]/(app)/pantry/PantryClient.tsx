@@ -158,21 +158,22 @@ export default function PantryClient({ initialItems }: { initialItems: PantryIte
         <div className="flex gap-2">
           <button
             onClick={() => setShowBarcode(true)}
-            className="bg-stone-100 text-stone-700 text-sm font-medium px-3 py-2 rounded-full hover:bg-stone-200 transition-colors"
+            className="bg-stone-100 text-stone-700 text-sm px-3 py-2 rounded-full hover:bg-stone-200 transition-colors"
             title="Barcode scannen"
           >
-            🔍 Barcode
+            🔍
           </button>
           <button
             onClick={() => fileRef.current?.click()}
             disabled={scanning}
-            className="bg-stone-100 text-stone-700 text-sm font-medium px-3 py-2 rounded-full hover:bg-stone-200 transition-colors"
+            className="bg-stone-100 text-stone-700 text-sm px-3 py-2 rounded-full hover:bg-stone-200 transition-colors"
+            title="Foto scannen"
           >
-            {scanning ? '...' : '📷 Scan'}
+            {scanning ? '⏳' : '📷'}
           </button>
           <button
             onClick={() => setShowAdd(true)}
-            className="bg-orange-500 text-white text-sm font-medium px-3 py-2 rounded-full hover:bg-orange-600 transition-colors"
+            className="bg-orange-500 text-white text-sm font-medium px-4 py-2 rounded-full hover:bg-orange-600 transition-colors"
           >
             + Toevoegen
           </button>

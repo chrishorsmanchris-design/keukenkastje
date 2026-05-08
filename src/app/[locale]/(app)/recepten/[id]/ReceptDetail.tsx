@@ -143,7 +143,7 @@ export default function ReceptDetail({ recipe }: { recipe: Recipe }) {
 
       <div className="px-4 pt-4 space-y-5">
         <div className="flex items-start justify-between gap-2">
-          <div>
+          <div className="min-w-0 flex-1">
             <h1 className="text-xl font-semibold leading-tight">{recipe.title}</h1>
             <div className="flex items-center gap-2 mt-1 flex-wrap">
               {recipe.cuisine && recipe.cuisine !== 'null' && <span className="text-sm">{CUISINE_FLAGS[recipe.cuisine]} {recipe.cuisine}</span>}
@@ -157,7 +157,7 @@ export default function ReceptDetail({ recipe }: { recipe: Recipe }) {
               ))}
             </div>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-3 flex-shrink-0">
             <button
               onClick={toggleFavorite}
               className="text-xl hover:scale-110 transition-transform"
@@ -165,9 +165,13 @@ export default function ReceptDetail({ recipe }: { recipe: Recipe }) {
             >
               {isFavorite ? '❤️' : '🤍'}
             </button>
-            <button onClick={shareRecipe} className="text-stone-400 text-lg">⬆️</button>
-            <button onClick={() => router.push(`${window.location.pathname}/bewerken`)} className="text-stone-400 text-sm px-2 py-1 bg-stone-100 rounded-lg">Bewerken</button>
-            <button onClick={() => router.back()} className="text-stone-400">✕</button>
+            <button onClick={shareRecipe} className="text-stone-400 text-lg" aria-label="Delen">⬆️</button>
+            <button
+              onClick={() => router.push(`${window.location.pathname}/bewerken`)}
+              className="text-stone-400 text-lg"
+              aria-label="Bewerken"
+            >✏️</button>
+            <button onClick={() => router.back()} className="text-stone-400 text-lg font-medium" aria-label="Sluiten">✕</button>
           </div>
         </div>
 

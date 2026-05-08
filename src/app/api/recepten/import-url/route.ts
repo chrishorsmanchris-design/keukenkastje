@@ -4,6 +4,109 @@ import { createClient } from '@/lib/supabase/server'
 
 const anthropic = new Anthropic()
 
+/** Extract JSON-LD Recipe from standard <script type="application/ld+json"> tags */
+function extractStandardJsonLd(html: string): Record<string, unknown> | null {
+  const matches = [...html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)]
+  for (const match of matches) {
+    try {
+      const data = JSON.parse(match[1])
+      const items = Array.isArray(data) ? data : data['@graph'] ? data['@graph'] : [data]
+      const found = items.find(
+        (item: Record<string, unknown>) =>
+          item['@type'] === 'Recipe' ||
+          (Array.isArray(item['@type']) && item['@type'].includes('Recipe'))
+      )
+      if (found) return found
+    } catch { /* continue */ }
+  }
+  return null
+}
+
+/**
+ * Extract JSON-LD Recipe from Next.js RSC streaming format.
+ * Picnic and other Next.js apps embed JSON-LD as escaped strings inside:
+ *   self.__next_f.push([1,"{ \"@type\":\"Recipe\", ... }"])
+ */
+function extractNextRscJsonLd(html: string): Record<string, unknown> | null {
+  // Search for escaped variant first: \"@type\":\"Recipe\"
+  const escapedNeedle = '\\"@type\\":\\"Recipe\\"'
+  const plainNeedle = '"@type":"Recipe"'
+
+  for (const { needle, escaped } of [
+    { needle: escapedNeedle, escaped: true },
+    { needle: plainNeedle, escaped: false },
+  ]) {
+    const idx = html.indexOf(needle)
+    if (idx === -1) continue
+
+    // Take a large window around the match
+    const windowStart = Math.max(0, idx - 15000)
+    const windowEnd = Math.min(html.length, idx + 60000)
+    let chunk = html.slice(windowStart, windowEnd)
+
+    if (escaped) {
+      // Unescape the JS string encoding
+      chunk = chunk
+        .replace(/\\"/g, '"')
+        .replace(/\\\\/g, '\\')
+        .replace(/\\n/g, '\n')
+        .replace(/\\r/g, '\r')
+        .replace(/\\t/g, '\t')
+    }
+
+    // Find "@type":"Recipe" in the processed chunk
+    const recipePos = chunk.indexOf('"@type":"Recipe"')
+    if (recipePos === -1) continue
+
+    // Walk backwards to find the opening { of this JSON object
+    let start = recipePos
+    while (start > 0 && chunk[start] !== '{') start--
+
+    // Walk forwards counting braces to find the matching }
+    let depth = 0
+    let end = start
+    for (; end < chunk.length; end++) {
+      if (chunk[end] === '{') depth++
+      else if (chunk[end] === '}') {
+        depth--
+        if (depth === 0) { end++; break }
+      }
+    }
+
+    try {
+      const obj = JSON.parse(chunk.slice(start, end))
+      if (obj?.['@type'] === 'Recipe') return obj
+    } catch { /* continue */ }
+  }
+
+  return null
+}
+
+/** Extract meta tag content */
+function getMeta(html: string, property: string): string | null {
+  return (
+    html.match(new RegExp(`<meta[^>]+property=["']${property}["'][^>]+content=["']([^"']+)["']`, 'i'))?.[1] ??
+    html.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+property=["']${property}["']`, 'i'))?.[1] ??
+    null
+  )
+}
+
+const CLAUDE_PROMPT = `Extract the recipe from this data. Translate everything to Dutch. Convert all measurements to metric units — never use cups, oz, lb, fl oz, or Fahrenheit. Use Dutch unit names: gram, ml, liter, eetlepel, theelepel. Convert Fahrenheit to Celsius.
+
+Return ONLY valid JSON:
+{
+  "title": "string (Dutch)",
+  "description": "string (Dutch)",
+  "servings": number,
+  "prep_time_minutes": number,
+  "cook_time_minutes": number,
+  "cuisine": "Italiaans|Midden-Oosters|Aziatisch|Nederlands|Mexicaans|Frans|Amerikaans|null",
+  "ingredient_type": "vis|vlees|kip|vegetarisch|pasta|rijst|soep|salade|null",
+  "diet_labels": [],
+  "ingredients": [{"name": "string", "amount": "string", "unit": "string"}],
+  "steps": [{"order": number, "text": "string", "timer_minutes": number|null}]
+}`
+
 export async function POST(req: NextRequest) {
   const { url } = await req.json()
   if (!url) return NextResponse.json({ error: 'No URL' }, { status: 400 })
@@ -32,22 +135,26 @@ export async function POST(req: NextRequest) {
     const html = await res.text()
     if (html.length < 500) throw new Error('Pagina heeft te weinig inhoud')
 
-    const ogImage = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)?.[1]
-      ?? html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i)?.[1]
-      ?? null
+    const ogImage = getMeta(html, 'og:image')
 
-    // Try JSON-LD first (most reliable)
-    const jsonLdMatches = [...html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)]
-    let structuredRecipe: Record<string, unknown> | null = null
-    for (const match of jsonLdMatches) {
-      try {
-        const data = JSON.parse(match[1])
-        const items = Array.isArray(data) ? data : data['@graph'] ? data['@graph'] : [data]
-        const found = items.find((item: Record<string, unknown>) => item['@type'] === 'Recipe' || (Array.isArray(item['@type']) && item['@type'].includes('Recipe')))
-        if (found) { structuredRecipe = found; break }
-      } catch { /* continue */ }
+    // ── 1. Standard JSON-LD ──────────────────────────────────────────────────
+    let structuredRecipe = extractStandardJsonLd(html)
+
+    // ── 2. Next.js RSC streaming format (Picnic etc.) ────────────────────────
+    if (!structuredRecipe) {
+      structuredRecipe = extractNextRscJsonLd(html)
     }
 
+    // ── 3. Instagram: they serve an empty JS shell — no content extractable ──
+    const isInstagram = /instagram\.com\/(p|reel|tv)\//.test(url)
+    if (isInstagram && !structuredRecipe) {
+      return NextResponse.json({
+        error: 'instagram_blocked',
+        message: 'Instagram laadt recepten niet in de browser. Kopieer het bijschrift (caption) van de Instagram-app en plak het hieronder.',
+      }, { status: 422 })
+    }
+
+    // ── Build source content for Claude ──────────────────────────────────────
     const sourceContent = structuredRecipe
       ? `JSON-LD structured data:\n${JSON.stringify(structuredRecipe).slice(0, 6000)}`
       : `Webpage text:\n${html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 8000)}`
@@ -57,23 +164,7 @@ export async function POST(req: NextRequest) {
       max_tokens: 1500,
       messages: [{
         role: 'user',
-        content: `Extract the recipe from this data. Translate everything to Dutch. Convert all measurements to metric units — never use cups, oz, lb, fl oz, or Fahrenheit. Use Dutch unit names: gram, ml, liter, eetlepel, theelepel. Convert Fahrenheit to Celsius.
-
-Return ONLY valid JSON:
-{
-  "title": "string (Dutch)",
-  "description": "string (Dutch)",
-  "servings": number,
-  "prep_time_minutes": number,
-  "cook_time_minutes": number,
-  "cuisine": "Italiaans|Midden-Oosters|Aziatisch|Nederlands|Mexicaans|Frans|Amerikaans|null",
-  "ingredient_type": "vis|vlees|kip|vegetarisch|pasta|rijst|soep|salade|null",
-  "diet_labels": [],
-  "ingredients": [{"name": "string", "amount": "string", "unit": "string"}],
-  "steps": [{"order": number, "text": "string", "timer_minutes": number|null}]
-}
-
-${sourceContent}`,
+        content: `${CLAUDE_PROMPT}\n\n${sourceContent}`,
       }],
     })
 
@@ -84,6 +175,7 @@ ${sourceContent}`,
     if (!jsonMatch) throw new Error('No JSON found')
 
     const recipe = JSON.parse(jsonMatch[0])
+    // Use og:image for image — for Instagram this is the video thumbnail
     if (ogImage) recipe.image_url = ogImage
     return NextResponse.json({ recipe, source_url: url })
   } catch (e) {

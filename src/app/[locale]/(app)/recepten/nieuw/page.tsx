@@ -16,6 +16,10 @@ export default function NieuwReceptPage() {
   const [importUrl, setImportUrl] = useState('')
   const [importing, setImporting] = useState(false)
   const [importError, setImportError] = useState('')
+  const [showPasteText, setShowPasteText] = useState(false)
+  const [pasteText, setPasteText] = useState('')
+  const [extracting, setExtracting] = useState(false)
+  const [pasteError, setPasteError] = useState('')
   const [scanning, setScanning] = useState(false)
   const [scanError, setScanError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -40,13 +44,43 @@ export default function NieuwReceptPage() {
         body: JSON.stringify({ url: importUrl }),
       })
       const data = await res.json()
-      if (!res.ok) { setImportError(data.error); setImporting(false); return }
+      if (!res.ok) {
+        if (data.error === 'instagram_blocked') {
+          setShowPasteText(true)
+          setImportError('')
+        } else {
+          setImportError(data.error ?? data.message ?? 'Import mislukt')
+        }
+        setImporting(false)
+        return
+      }
       setForm(f => ({ ...f, ...data.recipe, source_url: data.source_url ?? importUrl }))
       if (data.recipe.image_url) setPhotoPreview(data.recipe.image_url)
-    } catch (e) {
+    } catch {
       setImportError('Kan de URL niet bereiken.')
     }
     setImporting(false)
+  }
+
+  async function handleExtractText() {
+    if (!pasteText.trim()) return
+    setExtracting(true)
+    setPasteError('')
+    try {
+      const res = await fetch('/api/recepten/import-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: pasteText }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setPasteError(data.error); setExtracting(false); return }
+      setForm(f => ({ ...f, ...data.recipe, source_url: importUrl }))
+      setShowPasteText(false)
+      setPasteText('')
+    } catch {
+      setPasteError('Extractie mislukt.')
+    }
+    setExtracting(false)
   }
 
   async function handleBookScan(e: React.ChangeEvent<HTMLInputElement>) {
@@ -145,7 +179,53 @@ export default function NieuwReceptPage() {
             </button>
           </div>
           {importError && <p className="text-red-500 text-xs">{importError}</p>}
+          <button
+            type="button"
+            onClick={() => setShowPasteText(v => !v)}
+            className="text-xs text-purple-500 hover:text-purple-700 text-left"
+          >
+            📋 Instagram of tekst plakken
+          </button>
         </div>
+
+        {/* Instagram paste-text panel */}
+        {showPasteText && (
+          <div className="col-span-2 bg-purple-50 border border-purple-200 rounded-2xl p-4 space-y-3">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="text-sm font-medium text-purple-800">📋 Plak recepttekst</p>
+                <p className="text-xs text-purple-600 mt-0.5">
+                  Instagram blokkeert automatisch importeren. Open de Instagram-app, kopieer het bijschrift en plak het hieronder.
+                </p>
+              </div>
+              <button onClick={() => setShowPasteText(false)} className="text-purple-400 flex-shrink-0">✕</button>
+            </div>
+            <textarea
+              value={pasteText}
+              onChange={e => setPasteText(e.target.value)}
+              placeholder="Plak hier het recept of bijschrift..."
+              rows={6}
+              autoFocus
+              className="w-full px-3 py-2.5 rounded-xl border border-purple-200 bg-white text-sm outline-none focus:ring-2 focus:ring-purple-400 resize-none"
+            />
+            {pasteError && <p className="text-red-500 text-xs">{pasteError}</p>}
+            <button
+              onClick={handleExtractText}
+              disabled={extracting || !pasteText.trim()}
+              className="w-full py-2.5 bg-purple-500 text-white text-sm font-medium rounded-xl disabled:opacity-50 hover:bg-purple-600 transition-colors"
+            >
+              {extracting ? (
+                <span className="flex items-center justify-center gap-2">
+                  <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                  </svg>
+                  Recept extraheren…
+                </span>
+              ) : 'Recept extraheren'}
+            </button>
+          </div>
+        )}
 
         {/* Kookboek scan */}
         <label className={`col-span-2 ${scanning ? 'cursor-wait' : 'cursor-pointer'}`}>

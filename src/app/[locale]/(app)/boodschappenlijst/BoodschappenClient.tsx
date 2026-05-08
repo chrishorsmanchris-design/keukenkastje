@@ -296,24 +296,12 @@ function ItemRow({ item, onToggle, onDelete, onUpdateQuantity }: {
   onUpdateQuantity: (item: ShoppingItem, qty: number) => void
 }) {
   const [offsetX, setOffsetX] = useState(0)
-  const [editingQty, setEditingQty] = useState(false)
-  const [qtyValue, setQtyValue] = useState(String(item.quantity ?? '1'))
   const startX = useRef(0)
   const isDragging = useRef(false)
-  const qtyRef = useRef<HTMLInputElement>(null)
 
-  function openQtyEdit(e: React.MouseEvent) {
-    e.stopPropagation()
-    setQtyValue(String(item.quantity ?? '1'))
-    setEditingQty(true)
-    setTimeout(() => { qtyRef.current?.focus(); qtyRef.current?.select() }, 30)
-  }
-
-  function saveQty() {
-    const num = parseFloat(qtyValue)
-    if (!isNaN(num) && num > 0) onUpdateQuantity(item, num)
-    setEditingQty(false)
-  }
+  const qty = item.quantity ?? 1
+  const qtyLabel = Number.isInteger(qty) ? qty : qty.toFixed(1)
+  const unitLabel = item.unit ? ` ${item.unit}` : ''
 
   function onPointerDown(e: React.PointerEvent) {
     startX.current = e.clientX
@@ -338,13 +326,13 @@ function ItemRow({ item, onToggle, onDelete, onUpdateQuantity }: {
         <span className="text-white text-sm font-medium">Wis</span>
       </div>
       <div
-        className="relative flex items-center gap-3 bg-white px-3 py-2.5 border border-stone-100 rounded-xl text-left touch-pan-y"
+        className="relative flex items-center gap-2 bg-white px-3 py-2.5 border border-stone-100 rounded-xl text-left touch-pan-y"
         style={{ transform: `translateX(${offsetX}px)`, transition: `transform ${offsetX === 0 ? '200ms' : '0ms'}` }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerLeave={onPointerUp}
-        onClick={() => { if (!isDragging.current && !editingQty) onToggle(item) }}
+        onClick={() => { if (!isDragging.current) onToggle(item) }}
       >
         <div className={`w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
           item.checked ? 'bg-orange-500 border-orange-500' : 'border-stone-300'
@@ -352,35 +340,31 @@ function ItemRow({ item, onToggle, onDelete, onUpdateQuantity }: {
           {item.checked && <span className="text-white text-xs">✓</span>}
         </div>
 
-        <span className={`flex-1 text-sm ${item.checked ? 'line-through text-stone-400' : 'text-stone-800'}`}>
+        <span className={`flex-1 text-sm min-w-0 ${item.checked ? 'line-through text-stone-400' : 'text-stone-800'}`}>
           {item.name}
         </span>
 
-        {/* Tappable quantity badge */}
-        {editingQty ? (
-          <input
-            ref={qtyRef}
-            type="number"
-            value={qtyValue}
-            onChange={e => setQtyValue(e.target.value)}
-            onBlur={saveQty}
-            onKeyDown={e => { if (e.key === 'Enter') saveQty(); e.stopPropagation() }}
-            onClick={e => e.stopPropagation()}
-            className="w-16 text-xs text-center border border-orange-400 rounded-lg px-2 py-0.5 outline-none bg-orange-50"
-          />
-        ) : (
-          <button
-            onClick={openQtyEdit}
-            className={`text-xs px-2 py-0.5 rounded-full transition-colors flex-shrink-0 ${
-              item.quantity
-                ? 'text-stone-500 bg-stone-100 hover:bg-orange-100 hover:text-orange-600'
-                : 'text-stone-300 hover:text-orange-400'
-            }`}
-          >
-            {item.quantity
-              ? `${Number.isInteger(item.quantity) ? item.quantity : item.quantity.toFixed(1)}${item.unit ? ' ' + item.unit : ''}`
-              : '+ aantal'}
-          </button>
+        {/* +/- quantity controls */}
+        {!item.checked && (
+          <div className="flex items-center gap-0.5 flex-shrink-0" onClick={e => e.stopPropagation()}>
+            <button
+              onPointerDown={e => e.stopPropagation()}
+              onClick={() => onUpdateQuantity(item, Math.max(1, qty - 1))}
+              className="w-6 h-6 rounded-full bg-stone-100 text-stone-500 flex items-center justify-center text-sm leading-none hover:bg-orange-100 hover:text-orange-600 active:bg-orange-200 transition-colors"
+            >
+              −
+            </button>
+            <span className="text-xs text-stone-600 min-w-[2.5rem] text-center tabular-nums font-medium">
+              {qtyLabel}{unitLabel}
+            </span>
+            <button
+              onPointerDown={e => e.stopPropagation()}
+              onClick={() => onUpdateQuantity(item, qty + 1)}
+              className="w-6 h-6 rounded-full bg-stone-100 text-stone-500 flex items-center justify-center text-sm leading-none hover:bg-orange-100 hover:text-orange-600 active:bg-orange-200 transition-colors"
+            >
+              +
+            </button>
+          </div>
         )}
       </div>
     </div>
