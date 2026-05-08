@@ -40,7 +40,7 @@ function expiryLabel(days: number | null) {
 
 type ScannedProduct = { name: string; quantity: number; unit: string; expires_at: string; selected: boolean }
 
-export default function PantryClient({ initialItems }: { initialItems: PantryItem[] }) {
+export default function PantryClient({ initialItems, householdId }: { initialItems: PantryItem[]; householdId: string }) {
   const [items, setItems] = useState<PantryItem[]>(initialItems)
   const [showAdd, setShowAdd] = useState(false)
   const [scanning, setScanning] = useState(false)
@@ -53,23 +53,30 @@ export default function PantryClient({ initialItems }: { initialItems: PantryIte
 
   const expiringSoon = items.filter(i => { const d = daysUntil(i.expires_at); return d !== null && d <= 3 })
 
-  // Realtime sync
+  // Realtime sync — filter op household
   useEffect(() => {
     const supabase = createClient()
     const channel = supabase
-      .channel('pantry')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'pantry_items' }, payload => {
+      .channel(`pantry:${householdId}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'pantry_items',
+        filter: `household_id=eq.${householdId}`,
+      }, async payload => {
         if (payload.eventType === 'INSERT') {
-          setItems(prev => prev.some(i => i.id === payload.new.id) ? prev : [...prev, payload.new as PantryItem])
+          const { data } = await supabase.from('pantry_items').select('*').eq('id', payload.new.id).single()
+          if (data) setItems(prev => prev.some(i => i.id === data.id) ? prev : [...prev, data as PantryItem])
         } else if (payload.eventType === 'UPDATE') {
-          setItems(prev => prev.map(i => i.id === payload.new.id ? payload.new as PantryItem : i))
+          const { data } = await supabase.from('pantry_items').select('*').eq('id', payload.new.id).single()
+          if (data) setItems(prev => prev.map(i => i.id === data.id ? data as PantryItem : i))
         } else if (payload.eventType === 'DELETE') {
           setItems(prev => prev.filter(i => i.id !== payload.old.id))
         }
       })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [])
+  }, [householdId])
 
   async function getHousehold() {
     const supabase = createClient()

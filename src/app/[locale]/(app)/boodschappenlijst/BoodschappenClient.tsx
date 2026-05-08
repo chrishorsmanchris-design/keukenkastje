@@ -86,14 +86,16 @@ export default function BoodschappenClient({ initialItems, householdId }: { init
         schema: 'public',
         table: 'shopping_items',
         filter: `household_id=eq.${householdId}`,
-      }, payload => {
+      }, async payload => {
         if (payload.eventType === 'INSERT') {
-          const incoming = payload.new as ShoppingItem
-          if (!pendingDeletes.current.has(incoming.id)) {
-            setItems(prev => prev.some(i => i.id === incoming.id) ? prev : [...prev, incoming])
-          }
+          const id = payload.new.id
+          if (pendingDeletes.current.has(id)) return
+          // Haal de volledige rij op — payload kan incomplete kolommen bevatten
+          const { data } = await supabase.from('shopping_items').select('*').eq('id', id).single()
+          if (data) setItems(prev => prev.some(i => i.id === id) ? prev : [...prev, data as ShoppingItem])
         } else if (payload.eventType === 'UPDATE') {
-          setItems(prev => prev.map(i => i.id === payload.new.id ? payload.new as ShoppingItem : i))
+          const { data } = await supabase.from('shopping_items').select('*').eq('id', payload.new.id).single()
+          if (data) setItems(prev => prev.map(i => i.id === data.id ? data as ShoppingItem : i))
         } else if (payload.eventType === 'DELETE') {
           if (!pendingDeletes.current.has(payload.old.id)) {
             setItems(prev => prev.filter(i => i.id !== payload.old.id))
