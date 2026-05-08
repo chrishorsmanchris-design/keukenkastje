@@ -63,12 +63,16 @@ export default function BoodschappenClient({ initialItems, householdId }: { init
     return () => { window.removeEventListener('online', goOnline); window.removeEventListener('offline', goOffline) }
   }, [])
 
-  // localStorage fallback: als server geen items gaf (offline cached page), laad uit cache
+  // localStorage fallback: alleen gebruiken als server niets gaf én items hebben een naam
   useEffect(() => {
     if (initialItems.length === 0) {
       try {
         const raw = localStorage.getItem(CACHE_KEY)
-        if (raw) setItems(JSON.parse(raw))
+        if (raw) {
+          const cached = JSON.parse(raw) as ShoppingItem[]
+          const valid = cached.filter(i => !!i.name)
+          if (valid.length > 0) setItems(valid)
+        }
       } catch { /* ignore */ }
     }
   }, []) // eslint-disable-line
