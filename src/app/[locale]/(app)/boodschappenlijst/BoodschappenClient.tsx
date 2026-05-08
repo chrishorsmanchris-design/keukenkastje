@@ -132,7 +132,7 @@ export default function BoodschappenClient({ initialItems, householdId }: { init
     if (error || !data) {
       // Terugdraaien bij fout
       setItems(prev => prev.filter(i => i.id !== tempId))
-      toast(`Kon ${name} niet toevoegen`, 'error')
+      toast(`Fout: ${error?.message ?? error?.code ?? 'onbekend'}`, 'error')
     } else {
       // Vervang tijdelijk item door echte row
       setItems(prev => prev.map(i => i.id === tempId ? data as ShoppingItem : i))
