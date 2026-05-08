@@ -121,9 +121,21 @@ export default function BoodschappenClient({ initialItems, householdId }: { init
     setNewItem('')
     inputRef.current?.focus()
 
+    // householdId prop kan leeg zijn bij gecachede pagina — haal het altijd vers op
+    const { data: { user } } = await supabase.auth.getUser()
+    const { data: prof } = await supabase.from('profiles').select('household_id').eq('id', user!.id).single()
+    const hid = prof?.household_id ?? householdId
+
+    if (!hid) {
+      setItems(prev => prev.filter(i => i.id !== tempId))
+      toast('Fout: geen huishouden gevonden', 'error')
+      setAdding(false)
+      return
+    }
+
     const { data, error } = await supabase.from('shopping_items').insert({
       name,
-      household_id: householdId,
+      household_id: hid,
       is_manual: true,
       checked: false,
       category,
