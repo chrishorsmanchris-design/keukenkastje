@@ -51,7 +51,12 @@ export default function LoginPage() {
             />
           </div>
           <div className="space-y-1">
-            <label className="text-xs font-medium text-stone-500 uppercase tracking-wide">Wachtwoord</label>
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium text-stone-500 uppercase tracking-wide">Wachtwoord</label>
+              <Link href={`/${locale}/wachtwoord-vergeten`} className="text-xs text-orange-500 hover:text-orange-600">
+                Vergeten?
+              </Link>
+            </div>
             <input
               type="password"
               required
