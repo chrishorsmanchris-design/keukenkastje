@@ -100,10 +100,20 @@ export default function BoodschappenClient({ initialItems, householdId }: { init
     })
   }, [hid])
 
-  // Realtime sync — filter op household zodat beide gebruikers elkaars wijzigingen zien
+  // Realtime sync — bij elke wijziging alle items opnieuw laden voor betrouwbaarheid
   useEffect(() => {
     if (!hid) return
     const supabase = createClient()
+
+    async function reloadItems() {
+      const { data } = await supabase
+        .from('shopping_items').select('*')
+        .eq('household_id', hid)
+        .order('category', { ascending: true, nullsFirst: false })
+        .order('created_at')
+      if (data) setItems(data)
+    }
+
     const channel = supabase
       .channel(`shopping:${hid}`)
       .on('postgres_changes', {
@@ -113,17 +123,13 @@ export default function BoodschappenClient({ initialItems, householdId }: { init
         filter: `household_id=eq.${hid}`,
       }, async payload => {
         if (payload.eventType === 'INSERT') {
-          const id = payload.new.id
-          if (pendingDeletes.current.has(id)) return
-          // Haal de volledige rij op — payload kan incomplete kolommen bevatten
-          const { data } = await supabase.from('shopping_items').select('*').eq('id', id).single()
-          if (data) setItems(prev => prev.some(i => i.id === id) ? prev : [...prev, data as ShoppingItem])
+          if (pendingDeletes.current.has(payload.new.id)) return
+          await reloadItems()
         } else if (payload.eventType === 'UPDATE') {
-          const { data } = await supabase.from('shopping_items').select('*').eq('id', payload.new.id).single()
-          if (data) setItems(prev => prev.map(i => i.id === data.id ? data as ShoppingItem : i))
+          await reloadItems()
         } else if (payload.eventType === 'DELETE') {
           if (!pendingDeletes.current.has(payload.old.id)) {
-            setItems(prev => prev.filter(i => i.id !== payload.old.id))
+            await reloadItems()
           }
         }
       })
