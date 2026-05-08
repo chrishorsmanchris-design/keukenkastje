@@ -27,7 +27,8 @@ export default async function WeekmenuPage() {
       .from('week_menu')
       .select('*, recipe:recipes(*)')
       .in('date', dates)
-      .eq('meal_type', 'dinner'),
+      .eq('meal_type', 'dinner')
+      .eq('household_id', profile?.household_id ?? ''),
     supabase
       .from('recipes')
       .select('id, title, image_url, cuisine, servings, user_id')
@@ -35,5 +36,5 @@ export default async function WeekmenuPage() {
       .order('title'),
   ])
 
-  return <WeekmenuClient menuItems={menuItems ?? []} recipes={recipes ?? []} dates={dates} />
+  return <WeekmenuClient menuItems={menuItems ?? []} recipes={recipes ?? []} dates={dates} householdId={profile?.household_id ?? ''} />
 }
