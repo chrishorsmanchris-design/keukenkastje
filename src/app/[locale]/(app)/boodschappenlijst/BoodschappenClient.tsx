@@ -46,6 +46,8 @@ export default function BoodschappenClient({ initialItems, householdId }: { init
   const [search, setSearch] = useState('')
   const [adding, setAdding] = useState(false)
   const [isOffline, setIsOffline] = useState(false)
+  // hid is altijd geldig — prop kan leeg zijn bij gecachede pagina
+  const [hid, setHid] = useState(householdId)
   const inputRef = useRef<HTMLInputElement>(null)
   const toast = useToast()
   const undoTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
@@ -71,21 +73,44 @@ export default function BoodschappenClient({ initialItems, householdId }: { init
     }
   }, []) // eslint-disable-line
 
+  // Als hid pas client-side beschikbaar komt, laad items opnieuw van DB
+  useEffect(() => {
+    if (!hid || initialItems.length > 0) return
+    const supabase = createClient()
+    supabase.from('shopping_items').select('*')
+      .eq('household_id', hid)
+      .order('category', { ascending: true, nullsFirst: false })
+      .order('created_at')
+      .then(({ data }) => { if (data && data.length > 0) setItems(data) })
+  }, [hid]) // eslint-disable-line
+
   // Cache bijhouden bij elke wijziging
   useEffect(() => {
     try { localStorage.setItem(CACHE_KEY, JSON.stringify(items)) } catch { /* ignore */ }
   }, [items])
 
+  // Zorg altijd voor een geldige householdId — ook bij gecachede prop
+  useEffect(() => {
+    if (hid) return
+    const supabase = createClient()
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return
+      supabase.from('profiles').select('household_id').eq('id', user.id).single()
+        .then(({ data }) => { if (data?.household_id) setHid(data.household_id) })
+    })
+  }, [hid])
+
   // Realtime sync — filter op household zodat beide gebruikers elkaars wijzigingen zien
   useEffect(() => {
+    if (!hid) return
     const supabase = createClient()
     const channel = supabase
-      .channel(`shopping:${householdId}`)
+      .channel(`shopping:${hid}`)
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
         table: 'shopping_items',
-        filter: `household_id=eq.${householdId}`,
+        filter: `household_id=eq.${hid}`,
       }, async payload => {
         if (payload.eventType === 'INSERT') {
           const id = payload.new.id
@@ -104,7 +129,7 @@ export default function BoodschappenClient({ initialItems, householdId }: { init
       })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [householdId])
+  }, [hid])
 
   async function addItem(e: React.FormEvent) {
     e.preventDefault()
