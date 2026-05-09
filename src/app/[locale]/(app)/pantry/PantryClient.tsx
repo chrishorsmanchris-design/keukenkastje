@@ -40,7 +40,8 @@ function expiryLabel(days: number | null) {
 
 type ScannedProduct = { name: string; quantity: number; unit: string; expires_at: string; selected: boolean }
 
-export default function PantryClient({ initialItems, householdId }: { initialItems: PantryItem[]; householdId: string }) {
+export default function PantryClient({ initialItems, householdId, role = 'member' }: { initialItems: PantryItem[]; householdId: string; role?: string }) {
+  const canWrite = role !== 'viewer'
   const [items, setItems] = useState<PantryItem[]>(initialItems)
   const [showAdd, setShowAdd] = useState(false)
   const [scanning, setScanning] = useState(false)
@@ -184,29 +185,31 @@ export default function PantryClient({ initialItems, householdId }: { initialIte
     <div className="px-4 pt-10 pb-4 space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Pantry</h1>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setShowBarcode(true)}
-            className="bg-stone-100 text-stone-700 text-sm px-3 py-2 rounded-full hover:bg-stone-200 transition-colors"
-            title="Barcode scannen"
-          >
-            🔍
-          </button>
-          <button
-            onClick={() => fileRef.current?.click()}
-            disabled={scanning}
-            className="bg-stone-100 text-stone-700 text-sm px-3 py-2 rounded-full hover:bg-stone-200 transition-colors"
-            title="Foto scannen"
-          >
-            {scanning ? '⏳' : '📷'}
-          </button>
-          <button
-            onClick={() => setShowAdd(true)}
-            className="bg-orange-500 text-white text-sm font-medium px-4 py-2 rounded-full hover:bg-orange-600 transition-colors"
-          >
-            + Toevoegen
-          </button>
-        </div>
+        {canWrite && (
+          <div className="flex gap-2">
+            <button
+              onClick={() => setShowBarcode(true)}
+              className="bg-stone-100 text-stone-700 text-sm px-3 py-2 rounded-full hover:bg-stone-200 transition-colors"
+              title="Barcode scannen"
+            >
+              🔍
+            </button>
+            <button
+              onClick={() => fileRef.current?.click()}
+              disabled={scanning}
+              className="bg-stone-100 text-stone-700 text-sm px-3 py-2 rounded-full hover:bg-stone-200 transition-colors"
+              title="Foto scannen"
+            >
+              {scanning ? '⏳' : '📷'}
+            </button>
+            <button
+              onClick={() => setShowAdd(true)}
+              className="bg-orange-500 text-white text-sm font-medium px-4 py-2 rounded-full hover:bg-orange-600 transition-colors"
+            >
+              + Toevoegen
+            </button>
+          </div>
+        )}
       </div>
 
       <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoScan} />
@@ -287,7 +290,7 @@ export default function PantryClient({ initialItems, householdId }: { initialIte
                         item={item}
                         rowClass={rowClass}
                         label={label}
-                        onRemove={removeItem}
+                        onRemove={canWrite ? removeItem : undefined}
                         onUpdateQuantity={updateQuantity}
                         onChangeCategory={changeCategory}
                       />
@@ -359,7 +362,7 @@ function PantryRow({ item, rowClass, label, onRemove, onUpdateQuantity, onChange
   item: PantryItem
   rowClass: string
   label: { text: string; color: string } | null
-  onRemove: (id: string) => void
+  onRemove?: (id: string) => void
   onUpdateQuantity: (id: string, qty: number) => void
   onChangeCategory: (id: string, category: string) => void
 }) {
@@ -400,7 +403,7 @@ function PantryRow({ item, rowClass, label, onRemove, onUpdateQuantity, onChange
         >
           ⋯
         </button>
-        <button onClick={() => onRemove(item.id)} className="text-stone-300 hover:text-red-400 transition-colors flex-shrink-0">✕</button>
+        {onRemove && <button onClick={() => onRemove(item.id)} className="text-stone-300 hover:text-red-400 transition-colors flex-shrink-0">✕</button>}
       </div>
 
       {showPicker && (

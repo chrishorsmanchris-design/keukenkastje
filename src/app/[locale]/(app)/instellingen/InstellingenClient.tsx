@@ -5,7 +5,15 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 
 type Profile = { household_id: string; display_name: string; is_owner: boolean; locale: string; household: { name: string } | null }
-type Member = { id: string; display_name: string; is_owner: boolean }
+type Member = { id: string; display_name: string; is_owner: boolean; role: string }
+type Role = 'owner' | 'member' | 'viewer'
+
+const ROLE_LABELS: Record<Role, string> = { owner: 'Eigenaar', member: 'Lid', viewer: 'Kijker' }
+const ROLE_COLORS: Record<Role, string> = {
+  owner: 'bg-orange-100 text-orange-600',
+  member: 'bg-stone-100 text-stone-500',
+  viewer: 'bg-blue-100 text-blue-600',
+}
 type Source = { id: string; name: string; url?: string; type: 'website' | 'cookbook' | 'instagram' }
 
 const SUGGESTED_SOURCES: { name: string; url: string; type: 'website' | 'instagram' | 'cookbook'; category: string }[] = [
@@ -39,15 +47,20 @@ const SUGGESTED_SOURCES: { name: string; url: string; type: 'website' | 'instagr
 const SOURCE_CATEGORIES = ['Koks', 'Nederlands', 'Websites']
 
 export default function InstellingenClient({
-  profile, members, sources: initialSources, email,
+  profile, members: initialMembers, sources: initialSources, email, myRole, myId,
 }: {
   profile: Profile
   members: Member[]
   sources: Source[]
   email: string
+  myRole: string
+  myId: string
 }) {
   const router = useRouter()
   const [sources, setSources] = useState<Source[]>(initialSources)
+  const [members, setMembers] = useState<Member[]>(initialMembers)
+  const [memberLoading, setMemberLoading] = useState<string | null>(null)
+  const [memberError, setMemberError] = useState('')
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviting, setInviting] = useState(false)
   const [inviteSent, setInviteSent] = useState(false)
@@ -59,8 +72,38 @@ export default function InstellingenClient({
 
   async function getHouseholdId() {
     const supabase = createClient()
-    const { data } = await supabase.from('profiles').select('household_id').single()
+    const { data: { user } } = await supabase.auth.getUser()
+    const { data } = await supabase.from('profiles').select('household_id').eq('id', user!.id).single()
     return data?.household_id
+  }
+
+  async function changeRole(memberId: string, role: Role) {
+    setMemberLoading(memberId)
+    setMemberError('')
+    const res = await fetch('/api/household/role', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ memberId, role }),
+    })
+    const data = await res.json()
+    if (!res.ok) { setMemberError(data.error); setMemberLoading(null); return }
+    setMembers(ms => ms.map(m => m.id === memberId ? { ...m, role, is_owner: role === 'owner' } : m))
+    setMemberLoading(null)
+  }
+
+  async function removeMember(memberId: string) {
+    if (!confirm('Weet je zeker dat je dit lid wilt verwijderen?')) return
+    setMemberLoading(memberId)
+    setMemberError('')
+    const res = await fetch('/api/household/remove', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ memberId }),
+    })
+    const data = await res.json()
+    if (!res.ok) { setMemberError(data.error); setMemberLoading(null); return }
+    setMembers(ms => ms.filter(m => m.id !== memberId))
+    setMemberLoading(null)
   }
 
   async function addSource(name: string, url: string, type: Source['type']) {
@@ -265,28 +308,65 @@ export default function InstellingenClient({
       {/* Household */}
       <section className="bg-white rounded-2xl border border-stone-100 p-4 space-y-3">
         <h2 className="text-sm font-semibold text-stone-500 uppercase tracking-wide">Huishouden</h2>
-        <form onSubmit={saveHouseholdName} className="flex gap-2">
-          <input
-            type="text"
-            value={householdName}
-            onChange={e => setHouseholdName(e.target.value)}
-            placeholder="Naam van het huishouden"
-            className="flex-1 px-4 py-2.5 rounded-2xl border border-stone-200 text-sm outline-none focus:ring-2 focus:ring-orange-400"
-          />
-          <button type="submit" disabled={savingHousehold || !householdName.trim()} className="px-4 py-2.5 bg-orange-500 text-white text-sm rounded-2xl disabled:opacity-50">
-            {savingHousehold ? '...' : 'Opslaan'}
-          </button>
-        </form>
+        {myRole === 'owner' && (
+          <form onSubmit={saveHouseholdName} className="flex gap-2">
+            <input
+              type="text"
+              value={householdName}
+              onChange={e => setHouseholdName(e.target.value)}
+              placeholder="Naam van het huishouden"
+              className="flex-1 px-4 py-2.5 rounded-2xl border border-stone-200 text-sm outline-none focus:ring-2 focus:ring-orange-400"
+            />
+            <button type="submit" disabled={savingHousehold || !householdName.trim()} className="px-4 py-2.5 bg-orange-500 text-white text-sm rounded-2xl disabled:opacity-50">
+              {savingHousehold ? '...' : 'Opslaan'}
+            </button>
+          </form>
+        )}
+        {!householdName && myRole !== 'owner' && (
+          <p className="text-sm text-stone-500">{householdName || 'Geen naam'}</p>
+        )}
         <div className="space-y-2">
-          {members.map(m => (
-            <div key={m.id} className="flex items-center gap-2 text-sm">
-              <div className="w-7 h-7 rounded-full bg-orange-100 flex items-center justify-center text-xs font-bold text-orange-600">
-                {(m.display_name ?? '?')[0].toUpperCase()}
+          {memberError && <p className="text-xs text-red-500">{memberError}</p>}
+          {members.map(m => {
+            const isMe = m.id === myId
+            const isLoading = memberLoading === m.id
+            const memberRole = (m.role ?? (m.is_owner ? 'owner' : 'member')) as Role
+            return (
+              <div key={m.id} className="flex items-center gap-2 text-sm">
+                <div className="w-7 h-7 rounded-full bg-orange-100 flex items-center justify-center text-xs font-bold text-orange-600 shrink-0">
+                  {(m.display_name ?? '?')[0].toUpperCase()}
+                </div>
+                <span className="flex-1 truncate">{m.display_name ?? 'Naamloos'}{isMe && ' (jij)'}</span>
+                {/* Rollen beheren — alleen eigenaar, niet voor zichzelf */}
+                {myRole === 'owner' && !isMe ? (
+                  <select
+                    value={memberRole}
+                    disabled={isLoading}
+                    onChange={e => changeRole(m.id, e.target.value as Role)}
+                    className="text-xs border border-stone-200 rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-orange-400 disabled:opacity-50"
+                  >
+                    <option value="owner">Eigenaar</option>
+                    <option value="member">Lid</option>
+                    <option value="viewer">Kijker</option>
+                  </select>
+                ) : (
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${ROLE_COLORS[memberRole] ?? 'bg-stone-100 text-stone-500'}`}>
+                    {ROLE_LABELS[memberRole] ?? memberRole}
+                  </span>
+                )}
+                {myRole === 'owner' && !isMe && (
+                  <button
+                    onClick={() => removeMember(m.id)}
+                    disabled={isLoading}
+                    className="text-stone-300 hover:text-red-400 transition-colors disabled:opacity-50 text-lg leading-none"
+                    title="Verwijder lid"
+                  >
+                    {isLoading ? '…' : '×'}
+                  </button>
+                )}
               </div>
-              <span>{m.display_name ?? 'Naamloos'}</span>
-              {m.is_owner && <span className="text-xs bg-stone-100 text-stone-500 px-2 py-0.5 rounded-full">Eigenaar</span>}
-            </div>
-          ))}
+            )
+          })}
         </div>
       </section>
 

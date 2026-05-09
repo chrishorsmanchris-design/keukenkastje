@@ -30,13 +30,15 @@ type Recipe = { id: string; title: string; image_url?: string; cuisine?: string;
 type MenuItem = { id: string; date: string; servings: number; recipe?: Recipe }
 
 export default function WeekmenuClient({
-  menuItems, recipes, dates, householdId,
+  menuItems, recipes, dates, householdId, role = 'member',
 }: {
   menuItems: MenuItem[]
   recipes: Recipe[]
   dates: string[]
   householdId: string
+  role?: string
 }) {
+  const canWrite = role !== 'viewer'
   const router = useRouter()
   const { locale } = useParams()
   const [menu, setMenu] = useState<MenuItem[]>(menuItems)
@@ -230,13 +232,15 @@ export default function WeekmenuClient({
           <h1 className="text-2xl font-semibold">Weekmenu</h1>
           <Link href={`/${locale}/geschiedenis`} className="text-xs text-stone-400 hover:text-stone-600">Geschiedenis</Link>
         </div>
-        <button
-          onClick={generateShoppingList}
-          disabled={generating || selectedCount === 0}
-          className="bg-orange-500 text-white text-sm font-medium px-4 py-2 rounded-full hover:bg-orange-600 transition-colors disabled:opacity-40"
-        >
-          {generating ? '...' : `🛒 ${selectedCount > 0 ? `${selectedCount} recept${selectedCount !== 1 ? 'en' : ''}` : 'Boodschappen'}`}
-        </button>
+        {canWrite && (
+          <button
+            onClick={generateShoppingList}
+            disabled={generating || selectedCount === 0}
+            className="bg-orange-500 text-white text-sm font-medium px-4 py-2 rounded-full hover:bg-orange-600 transition-colors disabled:opacity-40"
+          >
+            {generating ? '...' : `🛒 ${selectedCount > 0 ? `${selectedCount} recept${selectedCount !== 1 ? 'en' : ''}` : 'Boodschappen'}`}
+          </button>
+        )}
       </div>
 
       {moving && (
@@ -282,7 +286,7 @@ export default function WeekmenuClient({
                   {!isToday && <span className="text-xs text-stone-300">{shortDate}</span>}
                   {isToday && <span className="text-xs bg-orange-500 text-white px-2 py-0.5 rounded-full">Vandaag</span>}
                 </div>
-                {item?.recipe && !moving && (
+                {item?.recipe && !moving && canWrite && (
                   <div className="flex items-center gap-2">
                     {/* Checkbox: include in shopping list */}
                     <button
@@ -328,7 +332,7 @@ export default function WeekmenuClient({
                       )}
                     </div>
                   </div>
-                  {!moving && (
+                  {!moving && canWrite && (
                     <div
                       className="flex items-center gap-2 bg-stone-100 rounded-full px-2 py-1 flex-shrink-0"
                       onClick={e => e.stopPropagation()}
@@ -339,13 +343,17 @@ export default function WeekmenuClient({
                     </div>
                   )}
                 </div>
-              ) : (
+              ) : canWrite ? (
                 <button
                   onClick={e => { e.stopPropagation(); if (!moving) setPicker(date) }}
                   className="mt-2 w-full text-sm text-stone-400 border border-dashed border-stone-200 rounded-xl py-2.5 hover:border-orange-300 hover:text-orange-400 transition-colors"
                 >
                   {moving ? '→ Hier neerzetten' : '+ Recept kiezen'}
                 </button>
+              ) : (
+                <div className="mt-2 w-full text-sm text-stone-300 border border-dashed border-stone-100 rounded-xl py-2.5 text-center">
+                  Vrij
+                </div>
               )}
             </div>
           )

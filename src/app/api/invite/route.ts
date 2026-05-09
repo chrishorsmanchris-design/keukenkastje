@@ -3,7 +3,6 @@ import { createClient } from '@/lib/supabase/server'
 
 export async function POST(req: NextRequest) {
   const { email } = await req.json()
-  if (!email) return NextResponse.json({ error: 'No email' }, { status: 400 })
 
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -15,7 +14,7 @@ export async function POST(req: NextRequest) {
   const token = crypto.randomUUID()
   const { error } = await supabase.from('invites').insert({
     household_id: profile.household_id,
-    email: email ?? null,
+    ...(email ? { email } : {}),
     token,
   })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

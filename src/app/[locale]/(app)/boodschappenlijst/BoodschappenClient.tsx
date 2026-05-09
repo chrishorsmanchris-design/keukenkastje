@@ -40,7 +40,8 @@ function categorize(name: string): string {
 
 const CACHE_KEY = 'boodschappen_cache'
 
-export default function BoodschappenClient({ initialItems, householdId }: { initialItems: ShoppingItem[]; householdId: string }) {
+export default function BoodschappenClient({ initialItems, householdId, role = 'member' }: { initialItems: ShoppingItem[]; householdId: string; role?: string }) {
+  const canWrite = role !== 'viewer'
   const [items, setItems] = useState<ShoppingItem[]>(initialItems)
   const [newItem, setNewItem] = useState('')
   const [search, setSearch] = useState('')
@@ -267,7 +268,7 @@ export default function BoodschappenClient({ initialItems, householdId }: { init
     <div className="px-4 pt-10 pb-4 space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Boodschappen</h1>
-        {checked.length > 0 && (
+        {canWrite && checked.length > 0 && (
           <button onClick={clearChecked} className="text-sm text-stone-400 hover:text-red-400 transition-colors">
             Wis afgevinkt ({checked.length})
           </button>
@@ -291,25 +292,27 @@ export default function BoodschappenClient({ initialItems, householdId }: { init
         className="w-full px-4 py-2.5 rounded-2xl border border-stone-200 bg-white text-sm outline-none focus:ring-2 focus:ring-orange-400"
       />
 
-      {/* Add item */}
-      <form onSubmit={addItem} className="flex gap-2">
-        <input
-          ref={inputRef}
-          type="text"
-          value={newItem}
-          onChange={e => setNewItem(e.target.value)}
-          placeholder={isOffline ? 'Offline — kan niet toevoegen' : 'Item toevoegen...'}
-          disabled={isOffline}
-          className="flex-1 px-4 py-2.5 rounded-2xl border border-stone-200 bg-white text-sm outline-none focus:ring-2 focus:ring-orange-400 disabled:opacity-50 disabled:cursor-not-allowed"
-        />
-        <button
-          type="submit"
-          disabled={adding || !newItem.trim() || isOffline}
-          className="px-4 py-2.5 bg-orange-500 text-white text-sm rounded-2xl disabled:opacity-50 hover:bg-orange-600 transition-colors"
-        >
-          +
-        </button>
-      </form>
+      {/* Add item — alleen voor owners en members */}
+      {canWrite && (
+        <form onSubmit={addItem} className="flex gap-2">
+          <input
+            ref={inputRef}
+            type="text"
+            value={newItem}
+            onChange={e => setNewItem(e.target.value)}
+            placeholder={isOffline ? 'Offline — kan niet toevoegen' : 'Item toevoegen...'}
+            disabled={isOffline}
+            className="flex-1 px-4 py-2.5 rounded-2xl border border-stone-200 bg-white text-sm outline-none focus:ring-2 focus:ring-orange-400 disabled:opacity-50 disabled:cursor-not-allowed"
+          />
+          <button
+            type="submit"
+            disabled={adding || !newItem.trim() || isOffline}
+            className="px-4 py-2.5 bg-orange-500 text-white text-sm rounded-2xl disabled:opacity-50 hover:bg-orange-600 transition-colors"
+          >
+            +
+          </button>
+        </form>
+      )}
 
       {items.length === 0 ? (
         <div className="text-center py-16 text-stone-400">
@@ -332,7 +335,7 @@ export default function BoodschappenClient({ initialItems, householdId }: { init
                     key={item.id}
                     item={item}
                     onToggle={toggleItem}
-                    onDelete={deleteItem}
+                    onDelete={canWrite ? deleteItem : undefined}
                     onUpdateQuantity={updateItemQuantity}
                   />
                 ))}
@@ -364,7 +367,7 @@ export default function BoodschappenClient({ initialItems, householdId }: { init
 function ItemRow({ item, onToggle, onDelete, onUpdateQuantity }: {
   item: ShoppingItem
   onToggle: (item: ShoppingItem) => void
-  onDelete: (item: ShoppingItem) => void
+  onDelete?: (item: ShoppingItem) => void
   onUpdateQuantity: (item: ShoppingItem, qty: number) => void
 }) {
   const [offsetX, setOffsetX] = useState(0)
@@ -388,15 +391,17 @@ function ItemRow({ item, onToggle, onDelete, onUpdateQuantity }: {
   }
 
   function onPointerUp() {
-    if (offsetX < -60) onDelete(item)
+    if (offsetX < -60 && onDelete) onDelete(item)
     else setOffsetX(0)
   }
 
   return (
     <div className="relative overflow-hidden rounded-xl">
-      <div className="absolute inset-y-0 right-0 w-20 bg-red-500 flex items-center justify-center rounded-xl">
-        <span className="text-white text-sm font-medium">Wis</span>
-      </div>
+      {onDelete && (
+        <div className="absolute inset-y-0 right-0 w-20 bg-red-500 flex items-center justify-center rounded-xl">
+          <span className="text-white text-sm font-medium">Wis</span>
+        </div>
+      )}
       <div
         className="relative flex items-center gap-2 bg-white px-3 py-2.5 border border-stone-100 rounded-xl text-left touch-pan-y"
         style={{ transform: `translateX(${offsetX}px)`, transition: `transform ${offsetX === 0 ? '200ms' : '0ms'}` }}

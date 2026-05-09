@@ -13,7 +13,6 @@ export default async function JoinPage({ params }: { params: Promise<{ token: st
     .from('invites')
     .select('*, household:households(name)')
     .eq('token', token)
-    .eq('accepted', false)
     .single()
 
   if (!invite) {
@@ -22,7 +21,7 @@ export default async function JoinPage({ params }: { params: Promise<{ token: st
         <div>
           <div className="text-4xl mb-3">❌</div>
           <h1 className="text-lg font-semibold">Uitnodiging ongeldig</h1>
-          <p className="text-stone-500 text-sm mt-1">Deze link is al gebruikt of verlopen.</p>
+          <p className="text-stone-500 text-sm mt-1">Deze link bestaat niet. Vraag de eigenaar om een nieuwe link.</p>
         </div>
       </div>
     )

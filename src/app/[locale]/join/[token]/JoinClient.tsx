@@ -37,7 +37,7 @@ export default function JoinClient({ token, householdName, locale }: { token: st
     const { error: upsertError } = await supabase
       .from('profiles')
       .upsert(
-        { id: user.id, household_id: invite.household_id, is_owner: false },
+        { id: user.id, household_id: invite.household_id, is_owner: false, role: 'member' },
         { onConflict: 'id' }
       )
 

@@ -6,8 +6,9 @@ export const dynamic = 'force-dynamic'
 export default async function PantryPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  const { data: profile } = await supabase.from('profiles').select('household_id').eq('id', user!.id).single()
+  const { data: profile } = await supabase.from('profiles').select('household_id, role').eq('id', user!.id).single()
   const householdId = profile?.household_id ?? ''
+  const role = profile?.role ?? 'member'
 
   const { data: items } = await supabase
     .from('pantry_items')
@@ -15,5 +16,5 @@ export default async function PantryPage() {
     .eq('household_id', householdId)
     .order('expires_at', { ascending: true, nullsFirst: false })
 
-  return <PantryClient initialItems={items ?? []} householdId={householdId} />
+  return <PantryClient initialItems={items ?? []} householdId={householdId} role={role} />
 }
