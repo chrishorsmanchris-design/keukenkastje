@@ -1,6 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
 import PantryClient from './PantryClient'
 
+export const dynamic = 'force-dynamic'
+
 export default async function PantryPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()

@@ -30,11 +30,12 @@ type Recipe = { id: string; title: string; image_url?: string; cuisine?: string;
 type MenuItem = { id: string; date: string; servings: number; recipe?: Recipe }
 
 export default function WeekmenuClient({
-  menuItems, recipes, dates,
+  menuItems, recipes, dates, householdId,
 }: {
   menuItems: MenuItem[]
   recipes: Recipe[]
   dates: string[]
+  householdId: string
 }) {
   const router = useRouter()
   const { locale } = useParams()
@@ -48,36 +49,48 @@ export default function WeekmenuClient({
   const [selectedDates, setSelectedDates] = useState<Set<string>>(
     () => new Set(menuItems.filter(m => m.recipe).map(m => m.date))
   )
+  const [hid, setHid] = useState(householdId)
 
   const today = new Date().toISOString().split('T')[0]
 
-  // Realtime sync — huisgenoten zien elkaars wijzigingen direct
+  // Zorg altijd voor geldige hid — ook bij gecachede prop
   useEffect(() => {
+    if (hid) return
     const supabase = createClient()
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return
+      supabase.from('profiles').select('household_id').eq('id', user.id).single()
+        .then(({ data }) => { if (data?.household_id) setHid(data.household_id) })
+    })
+  }, [hid])
+
+  // Realtime sync — reload alles bij elke wijziging
+  useEffect(() => {
+    if (!hid) return
+    const supabase = createClient()
+    const today = new Date().toISOString().split('T')[0]
+    const dates = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(); d.setDate(d.getDate() + i); return d.toISOString().split('T')[0]
+    })
+
+    async function reloadMenu() {
+      const { data } = await supabase
+        .from('week_menu').select('*, recipe:recipes(*)')
+        .in('date', dates).eq('meal_type', 'dinner').eq('household_id', hid)
+      if (data) setMenu(data as MenuItem[])
+    }
+
     const channel = supabase
-      .channel('weekmenu')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'week_menu' }, async payload => {
-        if (payload.eventType === 'INSERT') {
-          const { data } = await supabase
-            .from('week_menu')
-            .select('*, recipe:recipes(*)')
-            .eq('id', payload.new.id)
-            .single()
-          if (data) setMenu(prev => prev.some(m => m.id === data.id) ? prev : [...prev, data as MenuItem])
-        } else if (payload.eventType === 'UPDATE') {
-          const { data } = await supabase
-            .from('week_menu')
-            .select('*, recipe:recipes(*)')
-            .eq('id', payload.new.id)
-            .single()
-          if (data) setMenu(prev => prev.map(m => m.id === data.id ? data as MenuItem : m))
-        } else if (payload.eventType === 'DELETE') {
-          setMenu(prev => prev.filter(m => m.id !== payload.old.id))
-        }
-      })
+      .channel(`weekmenu:${hid}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'week_menu',
+        filter: `household_id=eq.${hid}`,
+      }, async () => { await reloadMenu() })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [])
+  }, [hid])
 
   const menuByDate = Object.fromEntries(menu.map(m => [m.date, m]))
 

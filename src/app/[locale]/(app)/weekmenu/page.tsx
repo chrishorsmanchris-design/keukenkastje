@@ -1,6 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
 import WeekmenuClient from './WeekmenuClient'
 
+export const dynamic = 'force-dynamic'
+
 function getWeekDates() {
   const today = new Date()
   return Array.from({ length: 7 }, (_, i) => {

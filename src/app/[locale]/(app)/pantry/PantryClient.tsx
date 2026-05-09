@@ -48,40 +48,62 @@ export default function PantryClient({ initialItems, householdId }: { initialIte
   const [saving, setSaving] = useState(false)
   const [newItem, setNewItem] = useState({ name: '', quantity: 1, unit: 'stuks' })
   const [showBarcode, setShowBarcode] = useState(false)
+  const [hid, setHid] = useState(householdId)
   const fileRef = useRef<HTMLInputElement>(null)
   const toast = useToast()
 
   const expiringSoon = items.filter(i => { const d = daysUntil(i.expires_at); return d !== null && d <= 3 })
 
-  // Realtime sync — filter op household
+  // Zorg altijd voor geldige hid — ook bij gecachede prop
   useEffect(() => {
+    if (hid) return
     const supabase = createClient()
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return
+      supabase.from('profiles').select('household_id').eq('id', user.id).single()
+        .then(({ data }) => { if (data?.household_id) setHid(data.household_id) })
+    })
+  }, [hid])
+
+  // Laad items opnieuw als hid beschikbaar komt (bij gecachede pagina)
+  useEffect(() => {
+    if (!hid || initialItems.length > 0) return
+    const supabase = createClient()
+    supabase.from('pantry_items').select('*').eq('household_id', hid)
+      .order('expires_at', { ascending: true, nullsFirst: false })
+      .then(({ data }) => { if (data && data.length > 0) setItems(data) })
+  }, [hid]) // eslint-disable-line
+
+  // Realtime sync — bij elke wijziging alle items opnieuw laden
+  useEffect(() => {
+    if (!hid) return
+    const supabase = createClient()
+
+    async function reloadItems() {
+      const { data } = await supabase.from('pantry_items').select('*')
+        .eq('household_id', hid)
+        .order('expires_at', { ascending: true, nullsFirst: false })
+      if (data) setItems(data)
+    }
+
     const channel = supabase
-      .channel(`pantry:${householdId}`)
+      .channel(`pantry:${hid}`)
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
         table: 'pantry_items',
-        filter: `household_id=eq.${householdId}`,
-      }, async payload => {
-        if (payload.eventType === 'INSERT') {
-          const { data } = await supabase.from('pantry_items').select('*').eq('id', payload.new.id).single()
-          if (data) setItems(prev => prev.some(i => i.id === data.id) ? prev : [...prev, data as PantryItem])
-        } else if (payload.eventType === 'UPDATE') {
-          const { data } = await supabase.from('pantry_items').select('*').eq('id', payload.new.id).single()
-          if (data) setItems(prev => prev.map(i => i.id === data.id ? data as PantryItem : i))
-        } else if (payload.eventType === 'DELETE') {
-          setItems(prev => prev.filter(i => i.id !== payload.old.id))
-        }
-      })
+        filter: `household_id=eq.${hid}`,
+      }, async () => { await reloadItems() })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [householdId])
+  }, [hid])
 
-  async function getHousehold() {
+  async function getHousehold(): Promise<string> {
+    if (hid) return hid
     const supabase = createClient()
-    const { data } = await supabase.from('profiles').select('household_id').single()
-    return data?.household_id
+    const { data: { user } } = await supabase.auth.getUser()
+    const { data } = await supabase.from('profiles').select('household_id').eq('id', user!.id).single()
+    return data?.household_id ?? ''
   }
 
   async function handlePhotoScan(e: React.ChangeEvent<HTMLInputElement>) {
