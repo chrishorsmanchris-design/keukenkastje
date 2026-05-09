@@ -95,7 +95,8 @@ export default function ReceptDetail({ recipe }: { recipe: Recipe }) {
   async function addToShoppingList() {
     setAdding(true)
     const supabase = createClient()
-    const { data: profile } = await supabase.from('profiles').select('household_id').single()
+    const { data: { user } } = await supabase.auth.getUser()
+    const { data: profile } = await supabase.from('profiles').select('household_id').eq('id', user!.id).single()
     const ingredients = recipe.ingredients as Ingredient[]
     await supabase.from('shopping_items').insert(
       ingredients.map(ing => ({
