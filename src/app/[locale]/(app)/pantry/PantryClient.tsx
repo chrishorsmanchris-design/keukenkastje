@@ -181,6 +181,13 @@ export default function PantryClient({ initialItems, householdId, role = 'member
     await supabase.from('pantry_items').update({ category }).eq('id', id)
   }, [])
 
+  const renameName = useCallback(async (id: string, name: string) => {
+    if (!name.trim()) return
+    setItems(prev => prev.map(i => i.id === id ? { ...i, name: name.trim() } : i))
+    const supabase = createClient()
+    await supabase.from('pantry_items').update({ name: name.trim() }).eq('id', id)
+  }, [])
+
   return (
     <div className="px-4 pt-10 pb-4 space-y-4">
       <div className="flex items-center justify-between">
@@ -293,6 +300,7 @@ export default function PantryClient({ initialItems, householdId, role = 'member
                         onRemove={canWrite ? removeItem : undefined}
                         onUpdateQuantity={updateQuantity}
                         onChangeCategory={changeCategory}
+                        onRename={canWrite ? renameName : undefined}
                       />
                     )
                   })}
@@ -358,22 +366,51 @@ export default function PantryClient({ initialItems, householdId, role = 'member
 
 // ─── PantryRow ────────────────────────────────────────────────────────────────
 
-function PantryRow({ item, rowClass, label, onRemove, onUpdateQuantity, onChangeCategory }: {
+function PantryRow({ item, rowClass, label, onRemove, onUpdateQuantity, onChangeCategory, onRename }: {
   item: PantryItem
   rowClass: string
   label: { text: string; color: string } | null
   onRemove?: (id: string) => void
   onUpdateQuantity: (id: string, qty: number) => void
   onChangeCategory: (id: string, category: string) => void
+  onRename?: (id: string, name: string) => void
 }) {
   const [showPicker, setShowPicker] = useState(false)
+  const [editingName, setEditingName] = useState(false)
+  const [nameValue, setNameValue] = useState(item.name)
   const currentCat = item.category ?? categorize(item.name)
+
+  function commitRename() {
+    setEditingName(false)
+    if (nameValue.trim() && nameValue.trim() !== item.name) {
+      onRename?.(item.id, nameValue.trim())
+    } else {
+      setNameValue(item.name)
+    }
+  }
 
   return (
     <div className={`rounded-xl border transition-colors ${rowClass}`}>
       <div className="flex items-center gap-3 px-3 py-2.5">
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium truncate">{item.name}</p>
+          {editingName ? (
+            <input
+              autoFocus
+              type="text"
+              value={nameValue}
+              onChange={e => setNameValue(e.target.value)}
+              onBlur={commitRename}
+              onKeyDown={e => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') { setNameValue(item.name); setEditingName(false) } }}
+              className="w-full text-sm font-medium bg-white border border-orange-300 rounded-lg px-2 py-0.5 outline-none focus:ring-2 focus:ring-orange-400"
+            />
+          ) : (
+            <p
+              className={`text-sm font-medium truncate ${onRename ? 'cursor-pointer hover:text-orange-600 transition-colors' : ''}`}
+              onClick={() => onRename && setEditingName(true)}
+            >
+              {item.name}
+            </p>
+          )}
         </div>
 
         {/* Quantity −/+ */}
