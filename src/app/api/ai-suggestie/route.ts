@@ -6,7 +6,8 @@ const anthropic = new Anthropic()
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
-  const { data: profile } = await supabase.from('profiles').select('household_id').single()
+  const { data: { user } } = await supabase.auth.getUser()
+  const { data: profile } = await supabase.from('profiles').select('household_id').eq('id', user!.id).single()
   if (!profile?.household_id) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
   const { data: pantry } = await supabase

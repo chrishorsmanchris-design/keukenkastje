@@ -200,7 +200,8 @@ export default function BoodschappenClient({ initialItems, householdId, role = '
         checked_at: checked ? new Date().toISOString() : null,
       }).eq('id', item.id)
       if (checked && item.category !== 'Persoonlijke verzorging' && item.category !== 'Overig') {
-        const { data: profile } = await supabase.from('profiles').select('household_id').single()
+        const { data: { user: currentUser } } = await supabase.auth.getUser()
+        const { data: profile } = await supabase.from('profiles').select('household_id').eq('id', currentUser!.id).single()
         await supabase.from('pantry_items').insert({
           name: item.name,
           quantity: item.quantity ?? 1,

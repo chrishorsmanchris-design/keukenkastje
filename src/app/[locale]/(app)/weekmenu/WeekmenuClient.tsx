@@ -113,7 +113,8 @@ export default function WeekmenuClient({
       await supabase.from('week_menu').update({ recipe_id: recipe.id, servings: recipe.servings }).eq('id', existing.id)
       setMenu(m => m.map(item => item.date === date ? { ...item, recipe, servings: recipe.servings } : item))
     } else {
-      const { data: profile } = await supabase.from('profiles').select('household_id').single()
+      const { data: { user } } = await supabase.auth.getUser()
+      const { data: profile } = await supabase.from('profiles').select('household_id').eq('id', user!.id).single()
       const { data } = await supabase.from('week_menu').insert({
         date, meal_type: 'dinner', recipe_id: recipe.id,
         servings: recipe.servings, household_id: profile?.household_id,
@@ -186,7 +187,8 @@ export default function WeekmenuClient({
   async function generateShoppingList() {
     setGenerating(true)
     const supabase = createClient()
-    const { data: profile } = await supabase.from('profiles').select('household_id').single()
+    const { data: { user } } = await supabase.auth.getUser()
+    const { data: profile } = await supabase.from('profiles').select('household_id').eq('id', user!.id).single()
     const householdId = profile?.household_id
 
     const planned = menu.filter(m => m.recipe && selectedDates.has(m.date))

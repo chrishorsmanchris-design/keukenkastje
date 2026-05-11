@@ -115,10 +115,8 @@ export default function NieuwReceptPage() {
   async function handleSave() {
     setSaving(true)
     const supabase = createClient()
-    const [{ data: profile }, { data: { user } }] = await Promise.all([
-      supabase.from('profiles').select('household_id').single(),
-      supabase.auth.getUser(),
-    ])
+    const { data: { user } } = await supabase.auth.getUser()
+    const { data: profile } = await supabase.from('profiles').select('household_id').eq('id', user!.id).single()
     const { data, error } = await supabase.from('recipes').insert({
       ...form,
       household_id: profile?.household_id,
