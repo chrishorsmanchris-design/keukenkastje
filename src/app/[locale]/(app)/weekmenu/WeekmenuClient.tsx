@@ -230,19 +230,19 @@ export default function WeekmenuClient({
   return (
     <div className="px-4 pt-10 pb-4 space-y-4">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-semibold">Weekmenu</h1>
-          <Link href={`/${locale}/geschiedenis`} className="text-xs text-stone-400 hover:text-stone-600">Geschiedenis</Link>
+        <h1 className="text-2xl font-semibold">Weekmenu</h1>
+        <div className="flex items-center gap-2">
+          <Link href={`/${locale}/geschiedenis`} className="text-xs text-stone-400 hover:text-stone-600 px-2 py-1.5">Geschiedenis</Link>
+          {canWrite && (
+            <button
+              onClick={generateShoppingList}
+              disabled={generating || selectedCount === 0}
+              className="bg-orange-500 text-white text-sm font-medium px-4 py-2 rounded-full hover:bg-orange-600 transition-colors disabled:opacity-40"
+            >
+              {generating ? '...' : `🛒 ${selectedCount > 0 ? `${selectedCount}` : ''}`}
+            </button>
+          )}
         </div>
-        {canWrite && (
-          <button
-            onClick={generateShoppingList}
-            disabled={generating || selectedCount === 0}
-            className="bg-orange-500 text-white text-sm font-medium px-4 py-2 rounded-full hover:bg-orange-600 transition-colors disabled:opacity-40"
-          >
-            {generating ? '...' : `🛒 ${selectedCount > 0 ? `${selectedCount} recept${selectedCount !== 1 ? 'en' : ''}` : 'Boodschappen'}`}
-          </button>
-        )}
       </div>
 
       {moving && (

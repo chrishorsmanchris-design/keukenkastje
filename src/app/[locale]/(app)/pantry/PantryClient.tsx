@@ -21,7 +21,21 @@ function categorize(name: string): string {
   return 'Overig'
 }
 
-const PANTRY_CATEGORIES = ['Zuivel & eieren','Vlees & vis','Groente & fruit','Brood','Droog & graan','Blikken & potten','Sauzen & oliën','Kruiden & specerijen','Dranken','Diepvries','Overig']
+const PANTRY_CATEGORY_CONFIG: { name: string; icon: string }[] = [
+  { name: 'Zuivel & eieren',      icon: '🥛' },
+  { name: 'Vlees & vis',          icon: '🥩' },
+  { name: 'Groente & fruit',      icon: '🥦' },
+  { name: 'Brood',                icon: '🍞' },
+  { name: 'Droog & graan',        icon: '🍝' },
+  { name: 'Blikken & potten',     icon: '🥫' },
+  { name: 'Sauzen & oliën',       icon: '🫙' },
+  { name: 'Kruiden & specerijen', icon: '🌿' },
+  { name: 'Dranken',              icon: '🥤' },
+  { name: 'Diepvries',            icon: '❄️' },
+  { name: 'Overig',               icon: '📦' },
+]
+const PANTRY_CATEGORIES = PANTRY_CATEGORY_CONFIG.map(c => c.name)
+const PANTRY_CATEGORY_ICON = Object.fromEntries(PANTRY_CATEGORY_CONFIG.map(c => [c.name, c.icon]))
 
 function daysUntil(dateStr?: string): number | null {
   if (!dateStr) return null
@@ -280,7 +294,10 @@ export default function PantryClient({ initialItems, householdId, role = 'member
           <div className="space-y-5">
             {PANTRY_CATEGORIES.filter(c => grouped[c]?.length).map(cat => (
               <div key={cat}>
-                <p className="text-xs font-semibold text-stone-400 uppercase tracking-wide mb-2">{cat}</p>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-base leading-none">{PANTRY_CATEGORY_ICON[cat]}</span>
+                  <p className="text-xs font-semibold text-stone-400 uppercase tracking-wide">{cat}</p>
+                </div>
                 <div className="space-y-2">
                   {grouped[cat].map(item => {
                     const days = daysUntil(item.expires_at)
