@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 
 type Profile = { household_id: string; display_name: string; is_owner: boolean; locale: string; household: { name: string } | null }
+type StoreConnection = { store: string; last_synced_at: string | null }
 type Member = { id: string; display_name: string; is_owner: boolean; role: string }
 type Role = 'owner' | 'member' | 'viewer'
 
@@ -47,7 +48,7 @@ const SUGGESTED_SOURCES: { name: string; url: string; type: 'website' | 'instagr
 const SOURCE_CATEGORIES = ['Koks', 'Nederlands', 'Websites']
 
 export default function InstellingenClient({
-  profile, members: initialMembers, sources: initialSources, email, myRole, myId,
+  profile, members: initialMembers, sources: initialSources, email, myRole, myId, storeConnections: initialStoreConnections,
 }: {
   profile: Profile
   members: Member[]
@@ -55,12 +56,20 @@ export default function InstellingenClient({
   email: string
   myRole: string
   myId: string
+  storeConnections: StoreConnection[]
 }) {
   const router = useRouter()
   const [sources, setSources] = useState<Source[]>(initialSources)
   const [members, setMembers] = useState<Member[]>(initialMembers)
   const [memberLoading, setMemberLoading] = useState<string | null>(null)
   const [memberError, setMemberError] = useState('')
+
+  // Winkelkoppelingen
+  const [storeConnections, setStoreConnections] = useState<StoreConnection[]>(initialStoreConnections)
+  const [storeForm, setStoreForm] = useState<{ store: string; email: string; password: string } | null>(null)
+  const [storeLoading, setStoreLoading] = useState<string | null>(null)
+  const [storeError, setStoreError] = useState('')
+  const [syncResult, setSyncResult] = useState<{ store: string; added: number } | null>(null)
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviting, setInviting] = useState(false)
   const [inviteSent, setInviteSent] = useState(false)
@@ -155,6 +164,52 @@ export default function InstellingenClient({
     await supabase.auth.signOut()
     router.push('/nl/login')
   }
+
+  async function connectStore(e: React.FormEvent) {
+    e.preventDefault()
+    if (!storeForm) return
+    setStoreLoading(storeForm.store)
+    setStoreError('')
+    const res = await fetch(`/api/stores/${storeForm.store}/connect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: storeForm.email, password: storeForm.password }),
+    })
+    const data = await res.json()
+    if (!res.ok) { setStoreError(data.error); setStoreLoading(null); return }
+    setStoreConnections(sc => {
+      const existing = sc.filter(s => s.store !== storeForm.store)
+      return [...existing, { store: storeForm.store, last_synced_at: null }]
+    })
+    setStoreForm(null)
+    setStoreLoading(null)
+  }
+
+  async function disconnectStore(store: string) {
+    if (!confirm(`Weet je zeker dat je ${store === 'picnic' ? 'Picnic' : 'Albert Heijn'} wilt loskoppelen?`)) return
+    setStoreLoading(store)
+    await fetch(`/api/stores/${store}/connect`, { method: 'DELETE' })
+    setStoreConnections(sc => sc.filter(s => s.store !== store))
+    setStoreLoading(null)
+  }
+
+  async function syncStore(store: string) {
+    setStoreLoading(store)
+    setStoreError('')
+    setSyncResult(null)
+    const res = await fetch(`/api/stores/${store}/sync`, { method: 'POST' })
+    const data = await res.json()
+    if (!res.ok) { setStoreError(data.error); setStoreLoading(null); return }
+    setStoreConnections(sc => sc.map(s => s.store === store ? { ...s, last_synced_at: new Date().toISOString() } : s))
+    setSyncResult({ store, added: data.added })
+    setStoreLoading(null)
+    setTimeout(() => setSyncResult(null), 4000)
+  }
+
+  const STORES = [
+    { id: 'picnic', label: 'Picnic', emoji: '🚲', color: 'bg-green-50 border-green-200' },
+    { id: 'ah', label: 'Albert Heijn', emoji: '🏪', color: 'bg-blue-50 border-blue-200' },
+  ]
 
   const [copySuccess, setCopySuccess] = useState(false)
   const [householdName, setHouseholdName] = useState(profile.household?.name ?? '')
@@ -413,6 +468,103 @@ export default function InstellingenClient({
             </button>
           </form>
         )}
+      </section>
+
+      {/* Winkelkoppelingen */}
+      <section className="bg-white rounded-2xl border border-stone-100 p-4 space-y-3">
+        <div>
+          <h2 className="text-sm font-semibold text-stone-500 uppercase tracking-wide">Winkelkoppelingen</h2>
+          <p className="text-xs text-stone-400 mt-1">Koppel je winkel om na aankopen automatisch je pantry bij te werken.</p>
+        </div>
+
+        {storeError && <p className="text-xs text-red-500">{storeError}</p>}
+        {syncResult && (
+          <div className="bg-green-50 border border-green-200 rounded-xl px-3 py-2 text-xs text-green-700">
+            ✓ {syncResult.added} {syncResult.added === 1 ? 'product' : 'producten'} toegevoegd aan pantry
+            {syncResult.added === 0 && ' — al up-to-date'}
+          </div>
+        )}
+
+        <div className="space-y-2">
+          {STORES.map(s => {
+            const conn = storeConnections.find(c => c.store === s.id)
+            const isLoading = storeLoading === s.id
+            const isFormOpen = storeForm?.store === s.id
+
+            return (
+              <div key={s.id} className={`rounded-xl border p-3 ${conn ? s.color : 'bg-stone-50 border-stone-100'}`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">{s.emoji}</span>
+                    <div>
+                      <p className="text-sm font-medium">{s.label}</p>
+                      {conn?.last_synced_at && (
+                        <p className="text-xs text-stone-400">
+                          Gesynchroniseerd {new Date(conn.last_synced_at).toLocaleDateString('nl-NL')}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {conn ? (
+                      <>
+                        <button
+                          onClick={() => syncStore(s.id)}
+                          disabled={isLoading}
+                          className="text-xs px-3 py-1.5 bg-white border border-stone-200 rounded-full hover:border-orange-300 transition-colors disabled:opacity-50"
+                        >
+                          {isLoading ? '...' : 'Sync'}
+                        </button>
+                        <button
+                          onClick={() => disconnectStore(s.id)}
+                          disabled={isLoading}
+                          className="text-stone-300 hover:text-red-400 transition-colors text-lg leading-none"
+                        >
+                          ×
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        onClick={() => setStoreForm(isFormOpen ? null : { store: s.id, email: '', password: '' })}
+                        className="text-xs px-3 py-1.5 bg-orange-500 text-white rounded-full hover:bg-orange-600 transition-colors"
+                      >
+                        Koppelen
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {isFormOpen && (
+                  <form onSubmit={connectStore} className="mt-3 space-y-2 border-t border-stone-100 pt-3">
+                    <input
+                      type="email"
+                      placeholder={`${s.label} e-mailadres`}
+                      value={storeForm!.email}
+                      onChange={e => setStoreForm(f => f ? { ...f, email: e.target.value } : f)}
+                      required
+                      className="w-full px-3 py-2 rounded-xl border border-stone-200 text-sm outline-none focus:ring-2 focus:ring-orange-400"
+                    />
+                    <input
+                      type="password"
+                      placeholder="Wachtwoord"
+                      value={storeForm!.password}
+                      onChange={e => setStoreForm(f => f ? { ...f, password: e.target.value } : f)}
+                      required
+                      className="w-full px-3 py-2 rounded-xl border border-stone-200 text-sm outline-none focus:ring-2 focus:ring-orange-400"
+                    />
+                    <p className="text-xs text-stone-400">Je wachtwoord wordt nooit opgeslagen — alleen het inlogtoken.</p>
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => setStoreForm(null)} className="flex-1 py-2 border border-stone-200 rounded-xl text-sm text-stone-500">Annuleren</button>
+                      <button type="submit" disabled={isLoading} className="flex-1 py-2 bg-orange-500 text-white rounded-xl text-sm disabled:opacity-50">
+                        {isLoading ? 'Verbinden...' : 'Verbinden'}
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
+            )
+          })}
+        </div>
       </section>
 
       <button
