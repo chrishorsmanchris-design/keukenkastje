@@ -23,6 +23,7 @@ export default function NieuwReceptPage() {
   const [scanning, setScanning] = useState(false)
   const [scanError, setScanError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
   const [pendingPhoto, setPendingPhoto] = useState<File | null>(null)
   const [photoPreview, setPhotoPreview] = useState('')
   const [form, setForm] = useState({
@@ -120,8 +121,8 @@ export default function NieuwReceptPage() {
     const { data, error } = await supabase.from('recipes').insert({
       ...form,
       household_id: profile?.household_id,
-      user_id: user!.id,
     }).select().single()
+    if (error) { setSaveError(error.message); setSaving(false); return }
     if (!error && data && pendingPhoto) {
       const fd = new FormData()
       fd.append('file', pendingPhoto)
@@ -431,6 +432,7 @@ export default function NieuwReceptPage() {
         </button>
       </div>
 
+      {saveError && <p className="text-red-500 text-sm text-center">{saveError}</p>}
       <button
         onClick={handleSave}
         disabled={saving || !form.title}
