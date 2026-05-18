@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 
@@ -215,15 +215,26 @@ export default function InstellingenClient({
   const [pushSupported, setPushSupported] = useState(false)
   const [pushEnabled, setPushEnabled] = useState(false)
   const [pushLoading, setPushLoading] = useState(false)
+  const [pushError, setPushError] = useState('')
+  const swRegRef = useRef<ServiceWorkerRegistration | null>(null)
+
+  // Converteer base64url VAPID key naar Uint8Array (vereist door browsers)
+  function vapidKey() {
+    const key = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? ''
+    const padding = '='.repeat((4 - key.length % 4) % 4)
+    const base64 = (key + padding).replace(/-/g, '+').replace(/_/g, '/')
+    const raw = window.atob(base64)
+    return Uint8Array.from([...raw].map(c => c.charCodeAt(0)))
+  }
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const supported = 'serviceWorker' in navigator && 'PushManager' in window
+    const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window
     setPushSupported(supported)
     if (!supported) return
 
-    // Registreer service worker
     navigator.serviceWorker.register('/sw.js').then(async reg => {
+      swRegRef.current = reg
       const sub = await reg.pushManager.getSubscription()
       setPushEnabled(!!sub && Notification.permission === 'granted')
     }).catch(() => {})
@@ -231,8 +242,12 @@ export default function InstellingenClient({
 
   async function togglePush() {
     setPushLoading(true)
+    setPushError('')
     try {
-      const reg = await navigator.serviceWorker.ready
+      let reg = swRegRef.current
+      if (!reg) reg = await navigator.serviceWorker.register('/sw.js')
+      swRegRef.current = reg
+
       if (pushEnabled) {
         const sub = await reg.pushManager.getSubscription()
         if (sub) {
@@ -246,10 +261,16 @@ export default function InstellingenClient({
         setPushEnabled(false)
       } else {
         const perm = await Notification.requestPermission()
+        if (perm === 'denied') {
+          setPushError('Notificaties zijn geblokkeerd in je browser. Ga naar browserinstellingen om ze toe te staan.')
+          setPushLoading(false)
+          return
+        }
         if (perm !== 'granted') { setPushLoading(false); return }
+
         const sub = await reg.pushManager.subscribe({
           userVisibleOnly: true,
-          applicationServerKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY,
+          applicationServerKey: vapidKey(),
         })
         await fetch('/api/push/subscribe', {
           method: 'POST',
@@ -258,7 +279,9 @@ export default function InstellingenClient({
         })
         setPushEnabled(true)
       }
-    } catch { /* ignore */ }
+    } catch (e) {
+      setPushError(e instanceof Error ? e.message : 'Kon notificaties niet inschakelen')
+    }
     setPushLoading(false)
   }
 
@@ -635,7 +658,17 @@ export default function InstellingenClient({
               <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${pushEnabled ? 'translate-x-6' : 'translate-x-0.5'}`} />
             </button>
           </div>
-          {pushEnabled && (
+          {pushLoading && (
+            <p className="text-xs text-stone-400 bg-stone-50 rounded-xl px-3 py-2">
+              ⏳ Bezig...
+            </p>
+          )}
+          {pushError && (
+            <p className="text-xs text-red-600 bg-red-50 rounded-xl px-3 py-2">
+              ⚠️ {pushError}
+            </p>
+          )}
+          {pushEnabled && !pushLoading && (
             <p className="text-xs text-green-600 bg-green-50 rounded-xl px-3 py-2">
               ✓ Notificaties ingeschakeld voor dit apparaat
             </p>
