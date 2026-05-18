@@ -8,6 +8,14 @@ export const metadata: Metadata = {
   title: "Keukenkastje",
   description: "Jouw slimme kookassistent",
   manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Keukenkastje",
+  },
+  icons: {
+    apple: "/icon-192.png",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

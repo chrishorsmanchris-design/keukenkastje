@@ -283,10 +283,70 @@ function KookstandView({
   const steps = recipe.steps as { order: number; text: string; timer_minutes?: number }[]
   const step = steps[activeStep]
   const isLast = activeStep === steps.length - 1
-  const [secondsLeft, setSecondsLeft] = useState<number | null>(null)
-  const [timerRunning, setTimerRunning] = useState(false)
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [showIngredients, setShowIngredients] = useState(false)
+
+  // --- Multi-timer systeem ---
+  interface ActiveTimer { id: string; label: string; endTime: number; stepIndex: number; totalSecs: number }
+  const [timers, setTimers] = useState<ActiveTimer[]>([])
+  const [, setTick] = useState(0)
+
+  // Web Audio beep — werkt ook als scherm aan is maar app op achtergrond
+  function playBeep() {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ctx = new (window.AudioContext ?? (window as any).webkitAudioContext)()
+      ;[0, 0.4, 0.8].forEach(t => {
+        const osc = ctx.createOscillator()
+        const gain = ctx.createGain()
+        osc.connect(gain); gain.connect(ctx.destination)
+        osc.frequency.value = 880
+        gain.gain.setValueAtTime(0.4, ctx.currentTime + t)
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.35)
+        osc.start(ctx.currentTime + t)
+        osc.stop(ctx.currentTime + t + 0.35)
+      })
+    } catch { /* AudioContext niet beschikbaar */ }
+  }
+
+  function addTimer(stepIndex: number, minutes: number) {
+    const id = `${stepIndex}-${Date.now()}`
+    setTimers(ts => [...ts, {
+      id, stepIndex, totalSecs: minutes * 60,
+      label: `Stap ${stepIndex + 1}`,
+      endTime: Date.now() + minutes * 60 * 1000,
+    }])
+  }
+
+  function removeTimer(id: string) {
+    setTimers(ts => ts.filter(t => t.id !== id))
+  }
+
+  // Tick elke seconde zolang er timers actief zijn
+  useEffect(() => {
+    if (timers.length === 0) return
+    const interval = setInterval(() => setTick(t => t + 1), 1000)
+    return () => clearInterval(interval)
+  }, [timers.length])
+
+  // Herbereken bij terugkeren van slaapstand
+  useEffect(() => {
+    function onVisible() { if (document.visibilityState === 'visible') setTick(t => t + 1) }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [])
+
+  // Controleer afgelopen timers bij elke tick
+  useEffect(() => {
+    const now = Date.now()
+    const done = timers.filter(t => t.endTime <= now)
+    if (done.length > 0) {
+      done.forEach(() => {
+        playBeep()
+        if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate([400, 100, 400, 100, 400])
+      })
+      setTimers(ts => ts.filter(t => t.endTime > now))
+    }
+  }) // elke render checken
 
   const ratio = servings / recipe.servings
   function scaleAmount(amount: string): string {
@@ -296,42 +356,14 @@ function KookstandView({
     return scaled % 1 === 0 ? scaled.toString() : scaled.toFixed(1)
   }
 
-  function startTimer() {
-    if (!step.timer_minutes) return
-    const secs = step.timer_minutes * 60
-    setSecondsLeft(secs)
-    setTimerRunning(true)
-  }
-
-  function stopTimer() {
-    if (timerRef.current) clearInterval(timerRef.current)
-    setTimerRunning(false)
-    setSecondsLeft(null)
-  }
-
-  useEffect(() => {
-    if (timerRunning && secondsLeft !== null) {
-      timerRef.current = setInterval(() => {
-        setSecondsLeft(s => {
-          if (s === null || s <= 1) {
-            clearInterval(timerRef.current!)
-            setTimerRunning(false)
-            if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate([400, 100, 400])
-            return 0
-          }
-          return s - 1
-        })
-      }, 1000)
-    }
-    return () => { if (timerRef.current) clearInterval(timerRef.current) }
-  }, [timerRunning])
-
-  // Timer blijft lopen bij stapwisseling
-
-  const mins = secondsLeft !== null ? Math.floor(secondsLeft / 60) : 0
-  const secs = secondsLeft !== null ? secondsLeft % 60 : 0
+  // Huidige stap timer
+  const currentTimer = timers.find(t => t.stepIndex === activeStep)
+  const secsLeft = currentTimer ? Math.max(0, Math.ceil((currentTimer.endTime - Date.now()) / 1000)) : null
+  const mins = secsLeft !== null ? Math.floor(secsLeft / 60) : 0
+  const secs = secsLeft !== null ? secsLeft % 60 : 0
   const totalSecs = (step.timer_minutes ?? 0) * 60
-  const progress = totalSecs > 0 && secondsLeft !== null ? secondsLeft / totalSecs : 0
+  const progress = totalSecs > 0 && secsLeft !== null ? secsLeft / totalSecs : 0
+  const otherTimers = timers.filter(t => t.stepIndex !== activeStep)
 
   return (
     <div className="min-h-screen bg-stone-900 text-white flex flex-col px-6 py-8">
@@ -365,16 +397,19 @@ function KookstandView({
         </div>
       </div>
 
-      {/* Mini-timer: loopt door als je naar andere stap gaat */}
-      {timerRunning && secondsLeft !== null && secondsLeft > 0 && !step.timer_minutes && (
-        <div className="bg-orange-500/20 border border-orange-500/40 rounded-2xl px-4 py-2 mb-4 flex items-center justify-between">
-          <span className="text-orange-300 text-sm">⏱ Timer loopt nog</span>
-          <span className="text-white font-bold tabular-nums text-sm">
-            {String(Math.floor(secondsLeft / 60)).padStart(2,'0')}:{String(secondsLeft % 60).padStart(2,'0')}
-          </span>
-          <button onClick={stopTimer} className="text-orange-300 text-xs ml-2">Stop</button>
-        </div>
-      )}
+      {/* Andere actieve timers (andere stappen) */}
+      {otherTimers.map(t => {
+        const s = Math.max(0, Math.ceil((t.endTime - Date.now()) / 1000))
+        return (
+          <div key={t.id} className="bg-orange-500/20 border border-orange-500/40 rounded-2xl px-4 py-2 mb-2 flex items-center justify-between">
+            <span className="text-orange-300 text-sm">⏱ {t.label}</span>
+            <span className="text-white font-bold tabular-nums text-sm">
+              {String(Math.floor(s / 60)).padStart(2,'0')}:{String(s % 60).padStart(2,'0')}
+            </span>
+            <button onClick={() => removeTimer(t.id)} className="text-orange-300 text-xs ml-2">Stop</button>
+          </div>
+        )
+      })}
 
       <div className="flex gap-1 mb-8">
         {steps.map((_, i) => (
@@ -391,7 +426,7 @@ function KookstandView({
 
         {step.timer_minutes && (
           <div className="mt-8">
-            {secondsLeft !== null ? (
+            {currentTimer ? (
               <div className="space-y-4">
                 {/* Circular progress */}
                 <div className="flex justify-center">
@@ -400,7 +435,7 @@ function KookstandView({
                       <circle cx="50" cy="50" r="44" fill="none" stroke="#292524" strokeWidth="8" />
                       <circle
                         cx="50" cy="50" r="44" fill="none"
-                        stroke={secondsLeft === 0 ? '#22c55e' : '#f97316'}
+                        stroke={secsLeft === 0 ? '#22c55e' : '#f97316'}
                         strokeWidth="8"
                         strokeLinecap="round"
                         strokeDasharray={`${2 * Math.PI * 44}`}
@@ -409,7 +444,7 @@ function KookstandView({
                       />
                     </svg>
                     <div className="absolute inset-0 flex flex-col items-center justify-center">
-                      {secondsLeft === 0 ? (
+                      {secsLeft === 0 ? (
                         <span className="text-green-400 text-2xl">✓</span>
                       ) : (
                         <>
@@ -422,13 +457,13 @@ function KookstandView({
                     </div>
                   </div>
                 </div>
-                <button onClick={stopTimer} className="w-full py-3 bg-stone-800 rounded-2xl text-sm">
+                <button onClick={() => removeTimer(currentTimer.id)} className="w-full py-3 bg-stone-800 rounded-2xl text-sm">
                   Timer stoppen
                 </button>
               </div>
             ) : (
               <button
-                onClick={startTimer}
+                onClick={() => addTimer(activeStep, step.timer_minutes!)}
                 className="w-full py-3.5 bg-stone-800 border border-stone-700 rounded-2xl font-medium flex items-center justify-center gap-2"
               >
                 <span>⏱</span>
