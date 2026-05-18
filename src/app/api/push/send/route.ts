@@ -3,11 +3,14 @@ import webpush from 'web-push'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 
-webpush.setVapidDetails(
-  `mailto:${process.env.VAPID_EMAIL ?? 'keukenkastje@example.com'}`,
-  process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!,
-  process.env.VAPID_PRIVATE_KEY!,
-)
+function getWebpush() {
+  webpush.setVapidDetails(
+    `mailto:${process.env.VAPID_EMAIL ?? 'keukenkastje@example.com'}`,
+    process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!,
+    process.env.VAPID_PRIVATE_KEY!,
+  )
+  return webpush
+}
 
 // Stuur notificatie naar alle abonnees van huishouden of specifieke user
 export async function POST(req: NextRequest) {
@@ -36,9 +39,10 @@ export async function POST(req: NextRequest) {
   const payload = JSON.stringify({ title, body, url: url ?? '/', tag: 'weekmenu' })
   let sent = 0
 
+  const wp = getWebpush()
   for (const row of subs) {
     try {
-      await webpush.sendNotification(row.subscription as webpush.PushSubscription, payload)
+      await wp.sendNotification(row.subscription as webpush.PushSubscription, payload)
       sent++
     } catch {
       // Verlopen subscription verwijderen
