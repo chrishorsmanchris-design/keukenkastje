@@ -308,17 +308,27 @@ function KookstandView({
     } catch { /* AudioContext niet beschikbaar */ }
   }
 
+  function sendSwMessage(msg: Record<string, unknown>) {
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage(msg)
+    }
+  }
+
   function addTimer(stepIndex: number, minutes: number) {
     const id = `${stepIndex}-${Date.now()}`
+    const label = `Stap ${stepIndex + 1}`
+    const durationMs = minutes * 60 * 1000
     setTimers(ts => [...ts, {
-      id, stepIndex, totalSecs: minutes * 60,
-      label: `Stap ${stepIndex + 1}`,
-      endTime: Date.now() + minutes * 60 * 1000,
+      id, stepIndex, totalSecs: minutes * 60, label,
+      endTime: Date.now() + durationMs,
     }])
+    // Plan ook een SW-notificatie zodat scherm-uit werkt
+    sendSwMessage({ type: 'SCHEDULE_TIMER', id, label, durationMs })
   }
 
   function removeTimer(id: string) {
     setTimers(ts => ts.filter(t => t.id !== id))
+    sendSwMessage({ type: 'CANCEL_TIMER', id })
   }
 
   // Tick elke seconde zolang er timers actief zijn

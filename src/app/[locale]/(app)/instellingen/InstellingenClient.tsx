@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 
@@ -210,6 +210,57 @@ export default function InstellingenClient({
     { id: 'picnic', label: 'Picnic', emoji: '🚲', color: 'bg-green-50 border-green-200' },
     { id: 'ah', label: 'Albert Heijn', emoji: '🏪', color: 'bg-blue-50 border-blue-200' },
   ]
+
+  // Push notificaties
+  const [pushSupported, setPushSupported] = useState(false)
+  const [pushEnabled, setPushEnabled] = useState(false)
+  const [pushLoading, setPushLoading] = useState(false)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const supported = 'serviceWorker' in navigator && 'PushManager' in window
+    setPushSupported(supported)
+    if (!supported) return
+
+    // Registreer service worker
+    navigator.serviceWorker.register('/sw.js').then(async reg => {
+      const sub = await reg.pushManager.getSubscription()
+      setPushEnabled(!!sub && Notification.permission === 'granted')
+    }).catch(() => {})
+  }, [])
+
+  async function togglePush() {
+    setPushLoading(true)
+    try {
+      const reg = await navigator.serviceWorker.ready
+      if (pushEnabled) {
+        const sub = await reg.pushManager.getSubscription()
+        if (sub) {
+          await sub.unsubscribe()
+          await fetch('/api/push/subscribe', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint: sub.endpoint }),
+          })
+        }
+        setPushEnabled(false)
+      } else {
+        const perm = await Notification.requestPermission()
+        if (perm !== 'granted') { setPushLoading(false); return }
+        const sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY,
+        })
+        await fetch('/api/push/subscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(sub),
+        })
+        setPushEnabled(true)
+      }
+    } catch { /* ignore */ }
+    setPushLoading(false)
+  }
 
   const [copySuccess, setCopySuccess] = useState(false)
   const [householdName, setHouseholdName] = useState(profile.household?.name ?? '')
@@ -566,6 +617,31 @@ export default function InstellingenClient({
           })}
         </div>
       </section>
+
+      {/* Notificaties */}
+      {pushSupported && (
+        <section className="bg-white rounded-2xl border border-stone-100 p-4 space-y-3">
+          <h2 className="text-sm font-semibold text-stone-500 uppercase tracking-wide">Notificaties</h2>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium">Timer-meldingen</p>
+              <p className="text-xs text-stone-400 mt-0.5">Melding als een timer afloopt, ook als het scherm uit is</p>
+            </div>
+            <button
+              onClick={togglePush}
+              disabled={pushLoading}
+              className={`relative w-12 h-6 rounded-full transition-colors disabled:opacity-50 ${pushEnabled ? 'bg-orange-500' : 'bg-stone-200'}`}
+            >
+              <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${pushEnabled ? 'translate-x-6' : 'translate-x-0.5'}`} />
+            </button>
+          </div>
+          {pushEnabled && (
+            <p className="text-xs text-green-600 bg-green-50 rounded-xl px-3 py-2">
+              ✓ Notificaties ingeschakeld voor dit apparaat
+            </p>
+          )}
+        </section>
+      )}
 
       <button
         onClick={logout}

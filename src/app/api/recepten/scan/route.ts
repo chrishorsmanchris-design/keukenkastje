@@ -21,20 +21,28 @@ export async function POST(req: NextRequest) {
         { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
         {
           type: 'text',
-          text: `This is a photo of a cookbook page. Extract the recipe and translate everything to Dutch. Convert all measurements to metric units — never use cups, oz, lb, fl oz, or Fahrenheit. Use Dutch unit names: gram, ml, liter, eetlepel, theelepel. Convert Fahrenheit to Celsius.
+          text: `This image contains a recipe — it could be a cookbook page, a social media screenshot (Instagram, TikTok), or any other recipe source. Extract ALL recipe information and translate everything to Dutch.
 
-Return ONLY valid JSON:
+Rules:
+- Convert all measurements to metric (never cups, oz, lb, fl oz, Fahrenheit)
+- Use Dutch unit names: gram, ml, liter, eetlepel, theelepel, snufje
+- Convert Fahrenheit to Celsius
+- If you see a social media post (Instagram etc), focus on the recipe text in the caption or overlay
+- If the image contains no recognizable recipe, return {"error": "Geen recept gevonden"}
+- Add timer_minutes to steps that have a clear cooking/resting duration
+
+Return ONLY valid JSON (no markdown, no explanation):
 {
   "title": "string (Dutch)",
-  "description": "string (Dutch)",
+  "description": "string (Dutch, max 100 chars)",
   "servings": number,
   "prep_time_minutes": number,
   "cook_time_minutes": number,
   "cuisine": "Italiaans|Midden-Oosters|Aziatisch|Nederlands|Mexicaans|Frans|Amerikaans|null",
   "ingredient_type": "vis|vlees|kip|vegetarisch|pasta|rijst|soep|salade|null",
-  "diet_labels": [],
+  "diet_labels": ["vegetarisch"|"vegan"|"glutenvrij"],
   "ingredients": [{"name": "string", "amount": "string", "unit": "string"}],
-  "steps": [{"order": number, "text": "string", "timer_minutes": number|null}]
+  "steps": [{"order": number, "text": "string (Dutch)", "timer_minutes": number|null}]
 }`,
         },
       ],
@@ -45,12 +53,13 @@ Return ONLY valid JSON:
   if (content.type !== 'text') return NextResponse.json({ error: 'No response' }, { status: 500 })
 
   const match = content.text.match(/\{[\s\S]*\}/)
-  if (!match) return NextResponse.json({ error: 'Geen recept gevonden in de foto' }, { status: 422 })
+  if (!match) return NextResponse.json({ error: 'Geen recept gevonden in de afbeelding. Probeer een duidelijkere foto of gebruik de tekst-plak optie.' }, { status: 422 })
 
   try {
-    const recipe = JSON.parse(match[0])
-    return NextResponse.json({ recipe })
+    const parsed = JSON.parse(match[0])
+    if (parsed.error) return NextResponse.json({ error: parsed.error }, { status: 422 })
+    return NextResponse.json({ recipe: parsed })
   } catch {
-    return NextResponse.json({ error: 'Kon het recept niet verwerken' }, { status: 500 })
+    return NextResponse.json({ error: 'Kon het recept niet verwerken. Probeer opnieuw.' }, { status: 500 })
   }
 }

@@ -226,35 +226,68 @@ export default function NieuwReceptPage() {
           </div>
         )}
 
-        {/* Kookboek scan */}
-        <label className={`col-span-2 ${scanning ? 'cursor-wait' : 'cursor-pointer'}`}>
-          <div className={`bg-stone-100 rounded-2xl p-4 flex items-center gap-3 transition-colors ${scanning ? '' : 'hover:bg-stone-200'}`}>
-            <span className="text-2xl">{scanning ? '⏳' : '📖'}</span>
-            <div className="flex-1">
-              <p className="text-sm font-medium text-stone-700">
-                {scanning ? 'Bezig met scannen...' : 'Scan kookboekpagina'}
-              </p>
-              <p className="text-xs text-stone-400">
-                {scanning ? 'Claude leest het recept uit de foto' : 'Maak een foto of kies een afbeelding'}
-              </p>
-            </div>
-            {scanning && (
+        {/* Kookboek scan — twee opties */}
+        <div className="col-span-2 space-y-2">
+          <div className="grid grid-cols-2 gap-2">
+            {/* Camera */}
+            <label className={scanning ? 'cursor-wait' : 'cursor-pointer'}>
+              <div className={`bg-stone-100 rounded-2xl p-4 flex flex-col items-center gap-2 transition-colors ${scanning ? '' : 'hover:bg-stone-200'}`}>
+                <span className="text-2xl">{scanning ? '⏳' : '📷'}</span>
+                <p className="text-xs font-medium text-stone-700 text-center">
+                  {scanning ? 'Scannen...' : 'Kookboek fotograferen'}
+                </p>
+              </div>
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={handleBookScan}
+                disabled={scanning}
+              />
+            </label>
+
+            {/* Foto uit bibliotheek / screenshot */}
+            <label className={scanning ? 'cursor-wait' : 'cursor-pointer'}>
+              <div className={`bg-purple-50 rounded-2xl p-4 flex flex-col items-center gap-2 transition-colors ${scanning ? '' : 'hover:bg-purple-100'}`}>
+                <span className="text-2xl">🖼️</span>
+                <p className="text-xs font-medium text-purple-700 text-center">Screenshot of foto</p>
+              </div>
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleBookScan}
+                disabled={scanning}
+              />
+            </label>
+          </div>
+
+          {scanning && (
+            <div className="bg-stone-50 rounded-xl px-4 py-3 flex items-center gap-3">
               <svg className="animate-spin w-5 h-5 text-orange-500 flex-shrink-0" viewBox="0 0 24 24" fill="none">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
               </svg>
-            )}
-          </div>
-          {scanError && <p className="text-red-500 text-xs mt-1 px-1">{scanError}</p>}
-          <input
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={handleBookScan}
-            disabled={scanning}
-          />
-        </label>
+              <div>
+                <p className="text-sm font-medium text-stone-700">Claude leest het recept…</p>
+                <p className="text-xs text-stone-400">Dit duurt 10–20 seconden</p>
+              </div>
+            </div>
+          )}
+          {scanError && (
+            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-start justify-between gap-2">
+              <div>
+                <p className="text-sm font-medium text-red-700">Scannen mislukt</p>
+                <p className="text-xs text-red-500 mt-0.5">{scanError}</p>
+              </div>
+              <button
+                onClick={() => setScanError('')}
+                className="text-red-300 hover:text-red-500 flex-shrink-0 text-lg leading-none"
+              >✕</button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Photo */}
