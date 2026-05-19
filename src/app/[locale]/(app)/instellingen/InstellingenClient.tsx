@@ -219,8 +219,9 @@ export default function InstellingenClient({
   const swRegRef = useRef<ServiceWorkerRegistration | null>(null)
 
   // Converteer base64url VAPID key naar Uint8Array (vereist door browsers)
+  // Public key mag hardcoded — private key blijft veilig in server env vars
   function vapidKey() {
-    const key = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? ''
+    const key = 'BM7AsrEzCERURFGSK7UILlaFz2za-dEeoNVWWLi-lDjtkyIGPc5WIe12FJu2abR4XuxEqaGCaxoh3XJCcDwOQxs'
     const padding = '='.repeat((4 - key.length % 4) % 4)
     const base64 = (key + padding).replace(/-/g, '+').replace(/_/g, '/')
     const raw = window.atob(base64)
