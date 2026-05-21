@@ -16,6 +16,7 @@ export default function NieuwReceptPage() {
   const [importUrl, setImportUrl] = useState('')
   const [importing, setImporting] = useState(false)
   const [importError, setImportError] = useState('')
+  const [importStatus, setImportStatus] = useState('')
   const [showPasteText, setShowPasteText] = useState(false)
   const [pasteText, setPasteText] = useState('')
   const [extracting, setExtracting] = useState(false)
@@ -38,12 +39,25 @@ export default function NieuwReceptPage() {
   async function handleImport() {
     setImporting(true)
     setImportError('')
+    setImportStatus('🌐 Pagina ophalen…')
+
+    // Progressieve status-updates
+    const steps = [
+      { delay: 1800, msg: '🔍 Recept herkennen…' },
+      { delay: 4000, msg: '✍️ Vertalen naar Nederlands…' },
+      { delay: 7000, msg: '⏳ Bijna klaar…' },
+    ]
+    const timers = steps.map(({ delay, msg }) =>
+      setTimeout(() => setImportStatus(msg), delay)
+    )
+
     try {
       const res = await fetch('/api/recepten/import-url', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: importUrl }),
       })
+      timers.forEach(clearTimeout)
       const data = await res.json()
       if (!res.ok) {
         if (data.error === 'instagram_blocked') {
@@ -53,14 +67,18 @@ export default function NieuwReceptPage() {
           setImportError(data.error ?? data.message ?? 'Import mislukt')
         }
         setImporting(false)
+        setImportStatus('')
         return
       }
+      setImportStatus('✅ Recept gevonden!')
       setForm(f => ({ ...f, ...data.recipe, source_url: data.source_url ?? importUrl }))
       if (data.recipe.image_url) setPhotoPreview(data.recipe.image_url)
     } catch {
+      timers.forEach(clearTimeout)
       setImportError('Kan de URL niet bereiken.')
     }
     setImporting(false)
+    setImportStatus('')
   }
 
   async function handleExtractText() {
@@ -188,6 +206,11 @@ export default function NieuwReceptPage() {
               ) : 'Haal op'}
             </button>
           </div>
+          {importStatus && !importError && (
+            <p className="text-orange-500 text-xs flex items-center gap-1.5 animate-pulse">
+              <span>{importStatus}</span>
+            </p>
+          )}
           {importError && (
             <p className="text-red-500 text-xs flex items-center gap-1">
               <span>⚠️</span> {importError}

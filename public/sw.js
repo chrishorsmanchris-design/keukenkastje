@@ -1,7 +1,7 @@
 // Keukenkastje Service Worker
 
 self.addEventListener('install', () => self.skipWaiting())
-self.addEventListener('activate', (e) => e.waitUntil(clients.claim()))
+// activate listener replaced below with cache-cleanup version
 
 // Push notification ontvangen van server
 self.addEventListener('push', (event) => {
@@ -30,6 +30,86 @@ self.addEventListener('notificationclick', (event) => {
       return clients.openWindow(url)
     })
   )
+})
+
+// ── Offline caching ───────────────────────────────────────────────────────────
+const CACHE_NAME = 'keukenkastje-v1'
+const IMAGE_CACHE = 'keukenkastje-images-v1'
+
+// Schoon oude caches op bij activatie
+self.addEventListener('activate', (e) => {
+  e.waitUntil(
+    caches.keys().then(keys =>
+      Promise.all(
+        keys
+          .filter(k => k !== CACHE_NAME && k !== IMAGE_CACHE)
+          .map(k => caches.delete(k))
+      )
+    ).then(() => clients.claim())
+  )
+})
+
+self.addEventListener('fetch', (event) => {
+  const { request } = event
+  if (request.method !== 'GET') return
+
+  const url = new URL(request.url)
+
+  // API routes: nooit cachen
+  if (url.pathname.startsWith('/api/')) return
+
+  // Recipe images (Supabase storage of externe URL): CacheFirst
+  const isImage = /\.(png|jpe?g|webp|gif|svg)($|\?)/i.test(url.pathname) ||
+    url.hostname.includes('supabase.co')
+  if (isImage) {
+    event.respondWith(
+      caches.open(IMAGE_CACHE).then(cache =>
+        cache.match(request).then(cached => {
+          if (cached) return cached
+          return fetch(request).then(response => {
+            if (response.ok) cache.put(request, response.clone())
+            return response
+          }).catch(() => cached ?? new Response('', { status: 404 }))
+        })
+      )
+    )
+    return
+  }
+
+  // Recept-detailpagina's: NetworkFirst met 4s timeout, dan cache
+  const isRecipePage = /\/recepten\/[^/]+$/.test(url.pathname)
+  if (isRecipePage) {
+    event.respondWith(
+      Promise.race([
+        fetch(request).then(response => {
+          if (response.ok) {
+            caches.open(CACHE_NAME).then(cache => cache.put(request, response.clone()))
+          }
+          return response
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000)),
+      ]).catch(() =>
+        caches.match(request).then(cached => cached ?? fetch(request))
+      )
+    )
+    return
+  }
+
+  // Next.js statische assets: CacheFirst (hebben content-hash in URL)
+  if (url.pathname.startsWith('/_next/static/')) {
+    event.respondWith(
+      caches.open(CACHE_NAME).then(cache =>
+        cache.match(request).then(cached => {
+          if (cached) return cached
+          return fetch(request).then(response => {
+            if (response.ok) cache.put(request, response.clone())
+            return response
+          })
+        })
+      )
+    )
+    return
+  }
 })
 
 // Timer notificaties plannen (client → SW bericht)

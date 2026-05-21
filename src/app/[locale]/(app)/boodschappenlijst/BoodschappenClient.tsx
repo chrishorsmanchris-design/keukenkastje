@@ -261,6 +261,7 @@ export default function BoodschappenClient({ initialItems, householdId, role = '
           expires_at: predictExpiry(item.name),
           household_id: profile?.household_id,
         })
+        toast(`🧺 ${item.name} toegevoegd aan pantry`)
       }
     }
   }

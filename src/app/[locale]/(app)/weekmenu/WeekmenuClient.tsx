@@ -3,6 +3,7 @@
 import { useState, useTransition, useEffect } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
+import Image from 'next/image'
 import { createClient } from '@/lib/supabase/client'
 
 const CUISINE_FLAGS: Record<string, string> = {
@@ -323,7 +324,7 @@ export default function WeekmenuClient({
                 <div className="mt-2 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
                     {item.recipe.image_url ? (
-                      <img src={item.recipe.image_url} alt="" className="w-10 h-10 rounded-xl object-cover flex-shrink-0" />
+                      <Image src={item.recipe.image_url} alt="" width={40} height={40} className="rounded-xl object-cover flex-shrink-0" unoptimized />
                     ) : (
                       <div className="w-10 h-10 rounded-xl bg-stone-100 flex items-center justify-center flex-shrink-0">🍽️</div>
                     )}
@@ -388,7 +389,7 @@ export default function WeekmenuClient({
                   className="w-full flex items-center gap-3 p-2 rounded-xl hover:bg-stone-50 transition-colors text-left"
                 >
                   {recipe.image_url ? (
-                    <img src={recipe.image_url} alt="" className="w-10 h-10 rounded-xl object-cover flex-shrink-0" />
+                    <Image src={recipe.image_url} alt="" width={40} height={40} className="rounded-xl object-cover flex-shrink-0" unoptimized />
                   ) : (
                     <div className="w-10 h-10 rounded-xl bg-stone-100 flex items-center justify-center flex-shrink-0">🍽️</div>
                   )}
