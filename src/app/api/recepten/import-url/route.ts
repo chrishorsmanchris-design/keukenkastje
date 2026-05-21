@@ -82,6 +82,38 @@ function extractNextRscJsonLd(html: string): Record<string, unknown> | null {
   return null
 }
 
+/**
+ * Extract the main article/recipe text from HTML.
+ * Tries common WordPress/blog content containers before falling back to full HTML.
+ */
+function extractMainText(html: string): string {
+  // Try common content containers in order of specificity
+  const containers = [
+    /<article[^>]*>([\s\S]*?)<\/article>/i,
+    /<div[^>]+class="[^"]*(?:entry-content|post-content|recipe-content|wprm-recipe|tasty-recipe|mv-recipe-card)[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
+    /<main[^>]*>([\s\S]*?)<\/main>/i,
+    /<div[^>]+(?:id|class)="[^"]*(?:content|main|post)[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
+  ]
+
+  for (const re of containers) {
+    const match = html.match(re)
+    if (match?.[1]) {
+      const text = match[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+      if (text.length > 300) return text.slice(0, 10000)
+    }
+  }
+
+  // Fallback: strip all tags from full HTML but skip <head> section
+  const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i)
+  const source = bodyMatch?.[1] ?? html
+  return source.replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 10000)
+}
+
 /** Extract meta tag content */
 function getMeta(html: string, property: string): string | null {
   return (
@@ -157,10 +189,10 @@ export async function POST(req: NextRequest) {
     // ── Build source content for Claude ──────────────────────────────────────
     const sourceContent = structuredRecipe
       ? `JSON-LD structured data:\n${JSON.stringify(structuredRecipe).slice(0, 6000)}`
-      : `Webpage text:\n${html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 8000)}`
+      : `Webpage text:\n${extractMainText(html)}`
 
     const message = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model: 'claude-sonnet-4-6',
       max_tokens: 1500,
       messages: [{
         role: 'user',
