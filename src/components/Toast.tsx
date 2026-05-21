@@ -12,9 +12,14 @@ export const useToast = () => useContext(ToastContext)
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<{ id: number; msg: string; type: ToastType; action?: ToastOptions['action'] }[]>([])
 
+  const MAX_TOASTS = 3
+
   const show = useCallback((msg: string, type: ToastType = 'success', options?: ToastOptions) => {
     const id = Date.now()
-    setToasts(t => [...t, { id, msg, type, action: options?.action }])
+    setToasts(t => {
+      const trimmed = t.length >= MAX_TOASTS ? t.slice(t.length - MAX_TOASTS + 1) : t
+      return [...trimmed, { id, msg, type, action: options?.action }]
+    })
     setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 5000)
   }, [])
 
