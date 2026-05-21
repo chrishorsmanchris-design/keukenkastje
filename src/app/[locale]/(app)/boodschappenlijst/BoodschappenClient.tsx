@@ -46,6 +46,7 @@ export default function BoodschappenClient({ initialItems, householdId, role = '
   const [newItem, setNewItem] = useState('')
   const [search, setSearch] = useState('')
   const [adding, setAdding] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [isOffline, setIsOffline] = useState(false)
   // hid is altijd geldig — prop kan leeg zijn bij gecachede pagina
   const [hid, setHid] = useState(householdId)
@@ -141,6 +142,19 @@ export default function BoodschappenClient({ initialItems, householdId, role = '
       .subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [hid])
+
+  async function refreshItems() {
+    if (!hid || isOffline) return
+    setRefreshing(true)
+    const supabase = createClient()
+    const { data } = await supabase
+      .from('shopping_items').select('*')
+      .eq('household_id', hid)
+      .order('category', { ascending: true, nullsFirst: false })
+      .order('created_at')
+    if (data) setItems(data)
+    setRefreshing(false)
+  }
 
   async function addItem(e: React.FormEvent) {
     e.preventDefault()
@@ -269,11 +283,28 @@ export default function BoodschappenClient({ initialItems, householdId, role = '
     <div className="px-4 pt-10 pb-4 space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Boodschappen</h1>
-        {canWrite && checked.length > 0 && (
-          <button onClick={clearChecked} className="text-sm text-stone-400 hover:text-red-400 transition-colors">
-            Wis afgevinkt ({checked.length})
+        <div className="flex items-center gap-3">
+          {canWrite && checked.length > 0 && (
+            <button onClick={clearChecked} className="text-sm text-stone-400 hover:text-red-400 transition-colors">
+              Wis afgevinkt ({checked.length})
+            </button>
+          )}
+          <button
+            onClick={refreshItems}
+            disabled={refreshing || isOffline}
+            className="text-stone-400 hover:text-stone-600 transition-colors disabled:opacity-40"
+            aria-label="Vernieuwen"
+            title="Lijst vernieuwen"
+          >
+            <svg
+              className={`w-5 h-5 ${refreshing ? 'animate-spin' : ''}`}
+              fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round"
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
           </button>
-        )}
+        </div>
       </div>
 
       {/* Offline banner */}

@@ -5,12 +5,26 @@ const anthropic = new Anthropic()
 
 export async function POST(req: NextRequest) {
   const formData = await req.formData()
-  const image = formData.get('image') as File | null
-  if (!image) return NextResponse.json({ error: 'No image' }, { status: 400 })
 
-  const buffer = Buffer.from(await image.arrayBuffer())
-  const base64 = buffer.toString('base64')
-  const mediaType = (image.type || 'image/jpeg') as 'image/jpeg' | 'image/png' | 'image/webp'
+  // Ondersteun meerdere afbeeldingen (image, image_1, image_2, ...)
+  const imageEntries = [...formData.entries()].filter(([k]) => k.startsWith('image'))
+  if (!imageEntries.length) return NextResponse.json({ error: 'No image' }, { status: 400 })
+
+  type ImageBlock = { type: 'image'; source: { type: 'base64'; media_type: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif'; data: string } }
+  const imageBlocks: ImageBlock[] = await Promise.all(
+    imageEntries.map(async ([, file]) => {
+      const f = file as File
+      const buffer = Buffer.from(await f.arrayBuffer())
+      return {
+        type: 'image' as const,
+        source: {
+          type: 'base64' as const,
+          media_type: (f.type || 'image/jpeg') as ImageBlock['source']['media_type'],
+          data: buffer.toString('base64'),
+        },
+      }
+    })
+  )
 
   const message = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',
@@ -18,7 +32,7 @@ export async function POST(req: NextRequest) {
     messages: [{
       role: 'user',
       content: [
-        { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+        ...imageBlocks,
         {
           type: 'text',
           text: `This image contains a recipe — it could be a cookbook page, a social media screenshot (Instagram, TikTok), or any other recipe source. Extract ALL recipe information and translate everything to Dutch.
@@ -28,7 +42,8 @@ Rules:
 - Use Dutch unit names: gram, ml, liter, eetlepel, theelepel, snufje
 - Convert Fahrenheit to Celsius
 - If you see a social media post (Instagram etc), focus on the recipe text in the caption or overlay
-- If the image contains no recognizable recipe, return {"error": "Geen recept gevonden"}
+- If the images together show a complete recipe (e.g. ingredients on one screenshot, steps on another), combine them into one recipe
+- If no recognizable recipe found in any image, return {"error": "Geen recept gevonden"}
 - Add timer_minutes to steps that have a clear cooking/resting duration
 
 Return ONLY valid JSON (no markdown, no explanation):

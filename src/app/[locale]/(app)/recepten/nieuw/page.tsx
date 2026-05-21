@@ -84,15 +84,20 @@ export default function NieuwReceptPage() {
     setExtracting(false)
   }
 
+  const [scanPreviews, setScanPreviews] = useState<string[]>([])
+
   async function handleBookScan(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
+    const files = Array.from(e.target.files ?? [])
+    if (!files.length) return
     setScanning(true)
     setScanError('')
-    setPhotoPreview(URL.createObjectURL(file))
-    setPendingPhoto(file)
+    // Toon previews van alle geselecteerde afbeeldingen
+    const previews = files.map(f => URL.createObjectURL(f))
+    setScanPreviews(previews)
+    setPhotoPreview(previews[0])
+    setPendingPhoto(files[0])
     const fd = new FormData()
-    fd.append('image', file)
+    files.forEach((f, i) => fd.append(i === 0 ? 'image' : `image_${i}`, f))
     try {
       const res = await fetch('/api/recepten/scan', { method: 'POST', body: fd })
       const data = await res.json()
@@ -247,21 +252,36 @@ export default function NieuwReceptPage() {
               />
             </label>
 
-            {/* Foto uit bibliotheek / screenshot */}
+            {/* Foto uit bibliotheek / meerdere screenshots */}
             <label className={scanning ? 'cursor-wait' : 'cursor-pointer'}>
               <div className={`bg-purple-50 rounded-2xl p-4 flex flex-col items-center gap-2 transition-colors ${scanning ? '' : 'hover:bg-purple-100'}`}>
                 <span className="text-2xl">🖼️</span>
-                <p className="text-xs font-medium text-purple-700 text-center">Screenshot of foto</p>
+                <p className="text-xs font-medium text-purple-700 text-center">Screenshots</p>
+                <p className="text-xs text-purple-400 text-center leading-tight">meerdere tegelijk mogelijk</p>
               </div>
               <input
                 type="file"
                 accept="image/*"
+                multiple
                 className="hidden"
                 onChange={handleBookScan}
                 disabled={scanning}
               />
             </label>
           </div>
+
+          {/* Previews van geselecteerde afbeeldingen */}
+          {scanPreviews.length > 1 && (
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {scanPreviews.map((src, i) => (
+                <img key={i} src={src} alt={`Screenshot ${i + 1}`}
+                  className="h-16 w-16 object-cover rounded-xl flex-shrink-0 border-2 border-purple-200" />
+              ))}
+              <div className="flex-shrink-0 h-16 w-16 rounded-xl bg-purple-50 border-2 border-dashed border-purple-200 flex items-center justify-center text-xs text-purple-400 text-center leading-tight p-1">
+                {scanPreviews.length} foto&apos;s
+              </div>
+            </div>
+          )}
 
           {scanning && (
             <div className="bg-stone-50 rounded-xl px-4 py-3 flex items-center gap-3">
