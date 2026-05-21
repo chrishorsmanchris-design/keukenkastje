@@ -44,7 +44,8 @@ function isLowStock(item: PantryItem): boolean {
   if (unit === 'ml' || unit === 'milliliter') return qty < 100
   if (unit === 'liter' || unit === 'l') return qty < 0.25
   if (unit === 'kg' || unit === 'kilogram') return qty < 0.1
-  return qty < 2
+  // Stuks/losse items niet als "bijna op" markeren — 1 fles olijfolie is gewoon 1
+  return false
 }
 
 function daysUntil(dateStr?: string): number | null {
@@ -263,19 +264,19 @@ export default function PantryClient({ initialItems, householdId, role = 'member
         </div>
       )}
 
-      {/* Bijna op banner */}
+      {/* Bijna op banner — compact */}
       {(() => {
         const laag = items.filter(i => isLowStock(i))
         if (laag.length === 0) return null
+        const preview = laag.slice(0, 3).map(i => i.name.split(',')[0].trim())
+        const rest = laag.length - preview.length
         return (
-          <div className="bg-orange-50 border border-orange-200 rounded-2xl px-4 py-3 flex items-start gap-2">
-            <span className="text-base flex-shrink-0">⚠️</span>
-            <div>
-              <p className="text-sm font-medium text-orange-800">Bijna op ({laag.length})</p>
-              <p className="text-xs text-orange-600 mt-0.5 leading-relaxed">
-                {laag.map(i => i.name).join(', ')}
-              </p>
-            </div>
+          <div className="bg-orange-50 border border-orange-200 rounded-2xl px-3 py-2.5 flex items-center gap-2">
+            <span className="text-sm flex-shrink-0">⚠️</span>
+            <p className="text-xs text-orange-700 min-w-0">
+              <span className="font-semibold">Bijna op:</span>{' '}
+              {preview.join(', ')}{rest > 0 ? ` +${rest} meer` : ''}
+            </p>
           </div>
         )
       })()}
@@ -462,7 +463,7 @@ function PantryRow({ item, rowClass, label, onRemove, onUpdateQuantity, onChange
             />
           ) : (
             <p
-              className={`text-sm font-medium truncate ${onRename ? 'cursor-pointer hover:text-orange-600 transition-colors' : ''}`}
+              className={`text-sm font-medium break-words leading-tight ${onRename ? 'cursor-pointer hover:text-orange-600 transition-colors' : ''}`}
               onClick={() => onRename && setEditingName(true)}
             >
               {item.name}
