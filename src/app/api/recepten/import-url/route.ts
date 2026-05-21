@@ -193,7 +193,7 @@ export async function POST(req: NextRequest) {
 
     const message = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 1500,
+      max_tokens: 3000,
       messages: [{
         role: 'user',
         content: `${CLAUDE_PROMPT}\n\n${sourceContent}`,
@@ -203,10 +203,27 @@ export async function POST(req: NextRequest) {
     const content = message.content[0]
     if (content.type !== 'text') throw new Error('No text response')
 
+    // Pak de laatste (meest complete) JSON-blob — bij afgekapte output is de eerste soms incompleet
+    const jsonMatches = [...content.text.matchAll(/\{[\s\S]*?\}/g)]
     const jsonMatch = content.text.match(/\{[\s\S]*\}/)
     if (!jsonMatch) throw new Error('No JSON found')
 
-    const recipe = JSON.parse(jsonMatch[0])
+    // Probeer te parsen; bij fout: verwijder trailing incomplete array-elementen
+    let recipe
+    try {
+      recipe = JSON.parse(jsonMatch[0])
+    } catch {
+      // Herstel afgeknipte JSON: verwijder incomplete laatste regel en sluit af
+      const cleaned = jsonMatch[0]
+        .replace(/,\s*\{[^}]*$/, '')   // incomplete laatste object in array
+        .replace(/,\s*"[^"]*$/, '')    // incomplete laatste key
+        .replace(/,\s*$/, '')          // trailing comma
+      // Sluit open arrays/objects
+      const opens = (cleaned.match(/\[/g) ?? []).length - (cleaned.match(/\]/g) ?? []).length
+      const closes = ']'.repeat(Math.max(0, opens))
+      recipe = JSON.parse(cleaned + closes + '}')
+    }
+    void jsonMatches // suppress unused warning
     // Use og:image for image — for Instagram this is the video thumbnail
     if (ogImage) recipe.image_url = ogImage
     return NextResponse.json({ recipe, source_url: url })

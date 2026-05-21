@@ -161,186 +161,167 @@ export default function NieuwReceptPage() {
         <h1 className="text-xl font-semibold">Nieuw recept</h1>
       </div>
 
-      {/* Import opties */}
-      <div className="grid grid-cols-2 gap-3">
-        {/* URL Import */}
-        <div className="col-span-2 bg-orange-50 rounded-2xl p-4 space-y-2">
-          <p className="text-sm font-medium text-orange-800">Importeer via URL</p>
+      {/* ── Importeer opties ── */}
+      <div className="space-y-3">
+
+        {/* URL */}
+        <div className="bg-stone-50 border border-stone-200 rounded-2xl p-4 space-y-2">
+          <p className="text-xs font-semibold text-stone-400 uppercase tracking-wide">Via URL</p>
           <div className="flex gap-2">
             <input
               type="url"
               placeholder="https://jamieoliver.com/..."
               value={importUrl}
               onChange={e => setImportUrl(e.target.value)}
-              className="flex-1 px-3 py-2 rounded-xl border border-orange-200 bg-white text-sm outline-none focus:ring-2 focus:ring-orange-400"
+              className="flex-1 px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-sm outline-none focus:ring-2 focus:ring-orange-400"
             />
             <button
               onClick={handleImport}
               disabled={importing || !importUrl}
-              className="px-4 py-2 bg-orange-500 text-white text-sm rounded-xl disabled:opacity-50 hover:bg-orange-600 transition-colors"
+              className="px-4 py-2.5 bg-orange-500 text-white text-sm font-medium rounded-xl disabled:opacity-50 hover:bg-orange-600 transition-colors flex-shrink-0"
             >
-              {importing ? '...' : 'Haal op'}
+              {importing ? (
+                <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                </svg>
+              ) : 'Haal op'}
             </button>
           </div>
-          {importError && <p className="text-red-500 text-xs">{importError}</p>}
-          <button
-            type="button"
-            onClick={() => setShowPasteText(v => !v)}
-            className="text-xs text-purple-500 hover:text-purple-700 text-left"
-          >
-            📋 Instagram of tekst plakken
-          </button>
+          {importError && (
+            <p className="text-red-500 text-xs flex items-center gap-1">
+              <span>⚠️</span> {importError}
+            </p>
+          )}
         </div>
 
-        {/* Instagram paste-text panel */}
-        {showPasteText && (
-          <div className="col-span-2 bg-purple-50 border border-purple-200 rounded-2xl p-4 space-y-3">
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <p className="text-sm font-medium text-purple-800">📋 Plak recepttekst</p>
-                <p className="text-xs text-purple-600 mt-0.5">
-                  Instagram blokkeert automatisch importeren. Open de Instagram-app, kopieer het bijschrift en plak het hieronder.
-                </p>
+        {/* Foto scannen — 3 gelijke opties */}
+        <div className="bg-stone-50 border border-stone-200 rounded-2xl p-4 space-y-3">
+          <p className="text-xs font-semibold text-stone-400 uppercase tracking-wide">Via foto</p>
+          <div className="grid grid-cols-3 gap-2">
+            {/* Camera */}
+            <label className={scanning ? 'cursor-wait' : 'cursor-pointer'}>
+              <div className={`bg-white border border-stone-200 rounded-xl py-3 px-2 flex flex-col items-center gap-1.5 transition-colors ${!scanning ? 'hover:border-orange-300 hover:bg-orange-50' : 'opacity-50'}`}>
+                <span className="text-xl">📷</span>
+                <p className="text-xs font-medium text-stone-600 text-center leading-tight">Camera</p>
               </div>
-              <button onClick={() => setShowPasteText(false)} className="text-purple-400 flex-shrink-0">✕</button>
+              <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleBookScan} disabled={scanning} />
+            </label>
+
+            {/* Screenshots */}
+            <label className={scanning ? 'cursor-wait' : 'cursor-pointer'}>
+              <div className={`bg-white border border-stone-200 rounded-xl py-3 px-2 flex flex-col items-center gap-1.5 transition-colors ${!scanning ? 'hover:border-orange-300 hover:bg-orange-50' : 'opacity-50'}`}>
+                <span className="text-xl">🖼️</span>
+                <p className="text-xs font-medium text-stone-600 text-center leading-tight">Screenshot</p>
+              </div>
+              <input type="file" accept="image/*" multiple className="hidden" onChange={handleBookScan} disabled={scanning} />
+            </label>
+
+            {/* Tekst plakken */}
+            <button
+              type="button"
+              onClick={() => setShowPasteText(v => !v)}
+              className={`bg-white border rounded-xl py-3 px-2 flex flex-col items-center gap-1.5 transition-colors ${showPasteText ? 'border-orange-400 bg-orange-50' : 'border-stone-200 hover:border-orange-300 hover:bg-orange-50'}`}
+            >
+              <span className="text-xl">📋</span>
+              <p className="text-xs font-medium text-stone-600 text-center leading-tight">Tekst</p>
+            </button>
+          </div>
+
+          {/* Foto preview + scan-status */}
+          {photoPreview && (
+            <div className="relative">
+              <img src={photoPreview} alt="" className={`w-full h-40 object-cover rounded-xl transition-all ${scanning ? 'brightness-50' : ''}`} />
+              {scanning && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-xl">
+                  <svg className="animate-spin w-7 h-7 text-white" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                  </svg>
+                  <p className="text-white text-xs font-medium">Claude leest het recept…</p>
+                </div>
+              )}
+              {!scanning && (
+                <label className="absolute bottom-2 right-2 cursor-pointer">
+                  <div className="bg-black/50 text-white text-xs px-2.5 py-1 rounded-full">📷 Wijzigen</div>
+                  <input type="file" accept="image/*" className="hidden" onChange={handlePhotoSelect} />
+                </label>
+              )}
             </div>
+          )}
+
+          {/* Scan status zonder foto */}
+          {scanning && !photoPreview && (
+            <div className="flex items-center gap-3 py-2">
+              <svg className="animate-spin w-5 h-5 text-orange-500 flex-shrink-0" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+              </svg>
+              <p className="text-sm text-stone-600">Claude leest het recept… (10–20 sec)</p>
+            </div>
+          )}
+
+          {/* Meerdere foto previews */}
+          {scanPreviews.length > 1 && (
+            <div className="flex gap-2 overflow-x-auto">
+              {scanPreviews.map((src, i) => (
+                <img key={i} src={src} alt="" className="h-14 w-14 object-cover rounded-lg flex-shrink-0 border border-stone-200" />
+              ))}
+              <div className="flex-shrink-0 h-14 w-14 rounded-lg bg-stone-100 border border-stone-200 flex items-center justify-center text-xs text-stone-400 text-center leading-tight p-1">
+                {scanPreviews.length}×
+              </div>
+            </div>
+          )}
+
+          {scanError && (
+            <div className="bg-red-50 border border-red-100 rounded-xl px-3 py-2.5 flex items-start justify-between gap-2">
+              <p className="text-xs text-red-600">{scanError}</p>
+              <button onClick={() => setScanError('')} className="text-red-300 hover:text-red-500 flex-shrink-0">✕</button>
+            </div>
+          )}
+        </div>
+
+        {/* Tekst plakken panel */}
+        {showPasteText && (
+          <div className="bg-stone-50 border border-stone-200 rounded-2xl p-4 space-y-3">
+            <p className="text-xs font-semibold text-stone-400 uppercase tracking-wide">Plak recepttekst</p>
+            <p className="text-xs text-stone-500">Kopieer de tekst uit Instagram, een blog of een ander bron en plak hem hieronder.</p>
             <textarea
               value={pasteText}
               onChange={e => setPasteText(e.target.value)}
               placeholder="Plak hier het recept of bijschrift..."
-              rows={6}
+              rows={5}
               autoFocus
-              className="w-full px-3 py-2.5 rounded-xl border border-purple-200 bg-white text-sm outline-none focus:ring-2 focus:ring-purple-400 resize-none"
+              className="w-full px-3 py-2.5 rounded-xl border border-stone-200 bg-white text-sm outline-none focus:ring-2 focus:ring-orange-400 resize-none"
             />
             {pasteError && <p className="text-red-500 text-xs">{pasteError}</p>}
             <button
               onClick={handleExtractText}
               disabled={extracting || !pasteText.trim()}
-              className="w-full py-2.5 bg-purple-500 text-white text-sm font-medium rounded-xl disabled:opacity-50 hover:bg-purple-600 transition-colors"
+              className="w-full py-2.5 bg-orange-500 text-white text-sm font-medium rounded-xl disabled:opacity-50 hover:bg-orange-600 transition-colors flex items-center justify-center gap-2"
             >
-              {extracting ? (
-                <span className="flex items-center justify-center gap-2">
-                  <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-                  </svg>
-                  Recept extraheren…
-                </span>
-              ) : 'Recept extraheren'}
+              {extracting && (
+                <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                </svg>
+              )}
+              {extracting ? 'Recept extraheren…' : 'Recept extraheren'}
             </button>
           </div>
         )}
 
-        {/* Kookboek scan — twee opties */}
-        <div className="col-span-2 space-y-2">
-          <div className="grid grid-cols-2 gap-2">
-            {/* Camera */}
-            <label className={scanning ? 'cursor-wait' : 'cursor-pointer'}>
-              <div className={`bg-stone-100 rounded-2xl p-4 flex flex-col items-center gap-2 transition-colors ${scanning ? '' : 'hover:bg-stone-200'}`}>
-                <span className="text-2xl">{scanning ? '⏳' : '📷'}</span>
-                <p className="text-xs font-medium text-stone-700 text-center">
-                  {scanning ? 'Scannen...' : 'Kookboek fotograferen'}
-                </p>
-              </div>
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                className="hidden"
-                onChange={handleBookScan}
-                disabled={scanning}
-              />
-            </label>
-
-            {/* Foto uit bibliotheek / meerdere screenshots */}
-            <label className={scanning ? 'cursor-wait' : 'cursor-pointer'}>
-              <div className={`bg-purple-50 rounded-2xl p-4 flex flex-col items-center gap-2 transition-colors ${scanning ? '' : 'hover:bg-purple-100'}`}>
-                <span className="text-2xl">🖼️</span>
-                <p className="text-xs font-medium text-purple-700 text-center">Screenshots</p>
-                <p className="text-xs text-purple-400 text-center leading-tight">meerdere tegelijk mogelijk</p>
-              </div>
-              <input
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={handleBookScan}
-                disabled={scanning}
-              />
-            </label>
-          </div>
-
-          {/* Previews van geselecteerde afbeeldingen */}
-          {scanPreviews.length > 1 && (
-            <div className="flex gap-2 overflow-x-auto pb-1">
-              {scanPreviews.map((src, i) => (
-                <img key={i} src={src} alt={`Screenshot ${i + 1}`}
-                  className="h-16 w-16 object-cover rounded-xl flex-shrink-0 border-2 border-purple-200" />
-              ))}
-              <div className="flex-shrink-0 h-16 w-16 rounded-xl bg-purple-50 border-2 border-dashed border-purple-200 flex items-center justify-center text-xs text-purple-400 text-center leading-tight p-1">
-                {scanPreviews.length} foto&apos;s
-              </div>
+        {/* Foto toevoegen (alleen als nog geen foto) */}
+        {!photoPreview && (
+          <label className="cursor-pointer block">
+            <div className="bg-stone-50 border border-dashed border-stone-300 rounded-2xl py-5 flex flex-col items-center gap-1.5 text-stone-400 hover:border-orange-300 hover:bg-orange-50 transition-colors">
+              <span className="text-2xl">🖼️</span>
+              <span className="text-xs font-medium">Foto toevoegen</span>
             </div>
-          )}
-
-          {scanning && (
-            <div className="bg-stone-50 rounded-xl px-4 py-3 flex items-center gap-3">
-              <svg className="animate-spin w-5 h-5 text-orange-500 flex-shrink-0" viewBox="0 0 24 24" fill="none">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-              </svg>
-              <div>
-                <p className="text-sm font-medium text-stone-700">Claude leest het recept…</p>
-                <p className="text-xs text-stone-400">Dit duurt 10–20 seconden</p>
-              </div>
-            </div>
-          )}
-          {scanError && (
-            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-start justify-between gap-2">
-              <div>
-                <p className="text-sm font-medium text-red-700">Scannen mislukt</p>
-                <p className="text-xs text-red-500 mt-0.5">{scanError}</p>
-              </div>
-              <button
-                onClick={() => setScanError('')}
-                className="text-red-300 hover:text-red-500 flex-shrink-0 text-lg leading-none"
-              >✕</button>
-            </div>
-          )}
-        </div>
+            <input type="file" accept="image/*" className="hidden" onChange={handlePhotoSelect} />
+          </label>
+        )}
       </div>
-
-      {/* Photo */}
-      <label className={`relative block ${scanning ? 'cursor-wait' : 'cursor-pointer'}`}>
-        {photoPreview ? (
-          <div className="relative">
-            <img src={photoPreview} alt="" className={`w-full h-48 object-cover rounded-2xl transition-all ${scanning ? 'brightness-50' : ''}`} />
-            {scanning && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 rounded-2xl">
-                <svg className="animate-spin w-8 h-8 text-white" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-                </svg>
-                <div className="text-center">
-                  <p className="text-white text-sm font-medium">Claude leest het recept…</p>
-                  <p className="text-white/70 text-xs mt-0.5">Dit duurt 10–20 seconden</p>
-                </div>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="w-full h-32 bg-stone-100 rounded-2xl flex flex-col items-center justify-center gap-1 text-stone-400 hover:bg-stone-200 transition-colors">
-            <span className="text-2xl">📷</span>
-            <span className="text-xs">Foto toevoegen</span>
-          </div>
-        )}
-        {photoPreview && !scanning && (
-          <div className="absolute inset-0 bg-black/0 hover:bg-black/20 rounded-2xl transition-colors flex items-center justify-center">
-            <span className="opacity-0 hover:opacity-100 text-white text-xs bg-black/50 px-3 py-1 rounded-full transition-opacity">📷 Wijzigen</span>
-          </div>
-        )}
-        <input type="file" accept="image/*" className="hidden" onChange={handlePhotoSelect} disabled={scanning} />
-      </label>
 
       {/* Title */}
       <div className="space-y-1">
