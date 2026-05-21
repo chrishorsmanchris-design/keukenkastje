@@ -57,6 +57,7 @@ type ScannedProduct = { name: string; quantity: number; unit: string; expires_at
 export default function PantryClient({ initialItems, householdId, role = 'member' }: { initialItems: PantryItem[]; householdId: string; role?: string }) {
   const canWrite = role !== 'viewer'
   const [items, setItems] = useState<PantryItem[]>(initialItems)
+  const [search, setSearch] = useState('')
   const [showAdd, setShowAdd] = useState(false)
   const [scanning, setScanning] = useState(false)
   const [scanned, setScanned] = useState<ScannedProduct[]>([])
@@ -235,6 +236,15 @@ export default function PantryClient({ initialItems, householdId, role = 'member
 
       <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoScan} />
 
+      {/* Search */}
+      <input
+        type="search"
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+        placeholder="Zoeken in pantry..."
+        className="w-full px-4 py-2.5 rounded-2xl border border-stone-200 bg-white text-sm outline-none focus:ring-2 focus:ring-orange-400"
+      />
+
       {/* Expiring soon banner */}
       {expiringSoon.length > 0 && (
         <div className="bg-orange-50 border border-orange-200 rounded-2xl p-3">
@@ -283,7 +293,10 @@ export default function PantryClient({ initialItems, householdId, role = 'member
           <p className="text-xs mt-1">Scan je koelkast of voeg producten handmatig toe</p>
         </div>
       ) : (() => {
-        const sorted = [...items].sort((a, b) => (daysUntil(a.expires_at) ?? 999) - (daysUntil(b.expires_at) ?? 999))
+        const filteredItems = search.trim()
+          ? items.filter(i => i.name.toLowerCase().includes(search.toLowerCase()))
+          : items
+        const sorted = [...filteredItems].sort((a, b) => (daysUntil(a.expires_at) ?? 999) - (daysUntil(b.expires_at) ?? 999))
         const grouped: Record<string, PantryItem[]> = {}
         for (const item of sorted) {
           const cat = item.category ?? categorize(item.name)

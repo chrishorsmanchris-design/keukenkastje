@@ -50,6 +50,8 @@ export default function BoodschappenClient({ initialItems, householdId, role = '
   const [isOffline, setIsOffline] = useState(false)
   // hid is altijd geldig — prop kan leeg zijn bij gecachede pagina
   const [hid, setHid] = useState(householdId)
+  const [listening, setListening] = useState(false)
+  const [speechSupported, setSpeechSupported] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const toast = useToast()
   const undoTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
@@ -63,6 +65,12 @@ export default function BoodschappenClient({ initialItems, householdId, role = '
     window.addEventListener('online', goOnline)
     window.addEventListener('offline', goOffline)
     return () => { window.removeEventListener('online', goOnline); window.removeEventListener('offline', goOffline) }
+  }, [])
+
+  // Speech Recognition support detectie
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setSpeechSupported(typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in (window as any)))
   }, [])
 
   // localStorage fallback: alleen gebruiken als server niets gaf én items hebben een naam
@@ -156,13 +164,18 @@ export default function BoodschappenClient({ initialItems, householdId, role = '
     setRefreshing(false)
   }
 
-  async function addItem(e: React.FormEvent) {
-    e.preventDefault()
-    if (!newItem.trim() || isOffline) return
-    setAdding(true)
+  async function addItemByName(name: string) {
+    if (isOffline) return
     const supabase = createClient()
 
-    const name = newItem.trim()
+    // Check duplicate — als unchecked item met zelfde naam bestaat, verhoog aantal
+    const duplicate = items.find(i => !i.checked && i.name.toLowerCase() === name.toLowerCase())
+    if (duplicate) {
+      await updateItemQuantity(duplicate, (duplicate.quantity ?? 1) + 1)
+      toast(`${(duplicate.quantity ?? 1) + 1}× ${duplicate.name}`)
+      return
+    }
+
     const category = categorize(name)
     const tempId = `temp-${Date.now()}`
     const optimistic: ShoppingItem = {
@@ -170,38 +183,63 @@ export default function BoodschappenClient({ initialItems, householdId, role = '
       is_manual: true, checked: false, created_at: new Date().toISOString(),
     }
     setItems(prev => [...prev, optimistic])
-    setNewItem('')
-    inputRef.current?.focus()
 
     // householdId prop kan leeg zijn bij gecachede pagina — haal het altijd vers op
     const { data: { user } } = await supabase.auth.getUser()
     const { data: prof } = await supabase.from('profiles').select('household_id').eq('id', user!.id).single()
-    const hid = prof?.household_id ?? householdId
+    const resolvedHid = prof?.household_id ?? householdId
 
-    if (!hid) {
+    if (!resolvedHid) {
       setItems(prev => prev.filter(i => i.id !== tempId))
       toast('Fout: geen huishouden gevonden', 'error')
-      setAdding(false)
       return
     }
 
     const { data, error } = await supabase.from('shopping_items').insert({
       name,
-      household_id: hid,
+      household_id: resolvedHid,
       is_manual: true,
       checked: false,
       category,
     }).select().single()
 
     if (error || !data) {
-      // Terugdraaien bij fout
       setItems(prev => prev.filter(i => i.id !== tempId))
       toast(`Fout: ${error?.message ?? error?.code ?? 'onbekend'}`, 'error')
     } else {
-      // Vervang tijdelijk item door echte row
       setItems(prev => prev.map(i => i.id === tempId ? data as ShoppingItem : i))
     }
+  }
+
+  async function addItem(e: React.FormEvent) {
+    e.preventDefault()
+    if (!newItem.trim() || isOffline) return
+    setAdding(true)
+    const name = newItem.trim()
+    setNewItem('')
+    inputRef.current?.focus()
+    await addItemByName(name)
     setAdding(false)
+  }
+
+  function startListening() {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const SpeechRecognitionAPI = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition
+    if (!SpeechRecognitionAPI) return
+    const recognition = new SpeechRecognitionAPI()
+    recognition.lang = 'nl-NL'
+    recognition.interimResults = false
+    recognition.maxAlternatives = 1
+    setListening(true)
+    recognition.onresult = (event: { results: { transcript: string }[][] }) => {
+      const transcript = event.results[0][0].transcript
+      const parts = transcript.split(/,\s*|\s+en\s+/).map((s: string) => s.trim()).filter(Boolean)
+      parts.forEach((item: string) => addItemByName(item))
+      setListening(false)
+    }
+    recognition.onerror = () => setListening(false)
+    recognition.onend = () => setListening(false)
+    recognition.start()
   }
 
   async function toggleItem(item: ShoppingItem) {
@@ -343,6 +381,19 @@ export default function BoodschappenClient({ initialItems, householdId, role = '
           >
             +
           </button>
+          {speechSupported && canWrite && (
+            <button
+              type="button"
+              onClick={startListening}
+              disabled={adding || isOffline}
+              className={`px-3 py-2.5 rounded-2xl text-sm transition-colors disabled:opacity-50 ${
+                listening ? 'bg-red-500 text-white animate-pulse' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+              }`}
+              title={listening ? 'Luisteren...' : 'Spraak invoer'}
+            >
+              🎤
+            </button>
+          )}
         </form>
       )}
 
@@ -474,6 +525,18 @@ function ItemRow({ item, onToggle, onDelete, onUpdateQuantity }: {
               +
             </button>
           </div>
+        )}
+        {onDelete && (
+          <button
+            onPointerDown={e => e.stopPropagation()}
+            onClick={e => { e.stopPropagation(); onDelete(item) }}
+            className="w-7 h-7 flex items-center justify-center text-stone-300 hover:text-red-400 transition-colors flex-shrink-0"
+            aria-label="Verwijderen"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+          </button>
         )}
       </div>
     </div>

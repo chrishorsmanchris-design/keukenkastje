@@ -9,5 +9,25 @@
   "icons": [
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ],
+  "shortcuts": [
+    {
+      "name": "Boodschappenlijst",
+      "short_name": "Boodschappen",
+      "url": "/nl/boodschappenlijst",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Weekmenu",
+      "short_name": "Weekmenu",
+      "url": "/nl/weekmenu",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Recepten",
+      "short_name": "Recepten",
+      "url": "/nl/recepten",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    }
   ]
 }

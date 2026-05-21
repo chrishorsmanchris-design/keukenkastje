@@ -38,7 +38,37 @@ export default function ReceptDetail({ recipe }: { recipe: Recipe }) {
   const [notes, setNotes] = useState(recipe.notes ?? '')
   const [savingNotes, setSavingNotes] = useState(false)
   const [isFavorite, setIsFavorite] = useState(recipe.is_favorite ?? false)
+  const [showPlanner, setShowPlanner] = useState(false)
+  const [plannerLoading, setPlannerLoading] = useState<string | null>(null)
+  const [plannerDone, setPlannerDone] = useState<string | null>(null)
   const notesTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date()
+    d.setDate(d.getDate() + i)
+    const date = d.toISOString().split('T')[0]
+    const label = i === 0 ? 'Vandaag' : i === 1 ? 'Morgen' : ['Zo', 'Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za'][d.getDay()]
+    return { date, label }
+  })
+
+  async function planOnDay(date: string) {
+    setPlannerLoading(date)
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    const { data: profile } = await supabase.from('profiles').select('household_id').eq('id', user!.id).single()
+
+    const { data: existing } = await supabase.from('week_menu')
+      .select('id').eq('date', date).eq('household_id', profile!.household_id).eq('meal_type', 'dinner').maybeSingle()
+
+    if (existing) {
+      await supabase.from('week_menu').update({ recipe_id: recipe.id, servings: recipe.servings }).eq('id', existing.id)
+    } else {
+      await supabase.from('week_menu').insert({ date, meal_type: 'dinner', recipe_id: recipe.id, servings: recipe.servings, household_id: profile!.household_id })
+    }
+    setPlannerLoading(null)
+    setPlannerDone(date)
+    setTimeout(() => { setShowPlanner(false); setPlannerDone(null) }, 1200)
+  }
 
   async function toggleFavorite() {
     const next = !isFavorite
@@ -259,13 +289,52 @@ export default function ReceptDetail({ recipe }: { recipe: Recipe }) {
           />
         </div>
 
-        <button
-          onClick={() => setKookstand(true)}
-          className="w-full py-3.5 bg-orange-500 text-white font-medium rounded-2xl hover:bg-orange-600 transition-colors"
-        >
-          🍳 Kookstand starten
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setKookstand(true)}
+            className="flex-1 py-3.5 bg-orange-500 text-white font-medium rounded-2xl hover:bg-orange-600 transition-colors"
+          >
+            🍳 Kookstand starten
+          </button>
+          <button
+            onClick={() => setShowPlanner(true)}
+            className="py-3.5 px-4 bg-stone-100 text-stone-700 font-medium rounded-2xl hover:bg-stone-200 transition-colors"
+          >
+            📅 Inplannen
+          </button>
+        </div>
       </div>
+
+      {showPlanner && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-end" onClick={() => setShowPlanner(false)}>
+          <div className="bg-white w-full rounded-t-3xl p-6 space-y-3" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-1">
+              <h2 className="font-semibold">Inplannen voor…</h2>
+              <button onClick={() => setShowPlanner(false)} className="text-stone-400">✕</button>
+            </div>
+            {days.map(({ date, label }) => (
+              <button
+                key={date}
+                onClick={() => planOnDay(date)}
+                disabled={!!plannerLoading}
+                className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl border transition-colors ${
+                  plannerDone === date ? 'bg-green-50 border-green-200' : 'bg-stone-50 border-stone-100 hover:border-orange-300 hover:bg-orange-50'
+                } disabled:opacity-50`}
+              >
+                <span className="font-medium text-sm">{label}</span>
+                {plannerLoading === date ? (
+                  <svg className="animate-spin w-4 h-4 text-orange-500" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
+                  </svg>
+                ) : plannerDone === date ? (
+                  <span className="text-green-500 text-sm">✓ Ingepland</span>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -284,6 +353,25 @@ function KookstandView({
   const step = steps[activeStep]
   const isLast = activeStep === steps.length - 1
   const [showIngredients, setShowIngredients] = useState(false)
+  const [wakeLockActive, setWakeLockActive] = useState(false)
+
+  // Houd scherm wakker tijdens kookstand
+  useEffect(() => {
+    if (!('wakeLock' in navigator)) return
+    let lock: WakeLockSentinel | null = null
+    navigator.wakeLock.request('screen').then(l => { lock = l; setWakeLockActive(true) }).catch(() => {})
+    const reacquire = () => {
+      if (document.visibilityState === 'visible') {
+        navigator.wakeLock.request('screen').then(l => { lock = l; setWakeLockActive(true) }).catch(() => {})
+      }
+    }
+    document.addEventListener('visibilitychange', reacquire)
+    return () => {
+      lock?.release()
+      setWakeLockActive(false)
+      document.removeEventListener('visibilitychange', reacquire)
+    }
+  }, [])
 
   // --- Multi-timer systeem ---
   interface ActiveTimer { id: string; label: string; endTime: number; stepIndex: number; totalSecs: number }
@@ -395,6 +483,10 @@ function KookstandView({
               className="w-5 h-5 flex items-center justify-center text-stone-400 hover:text-white"
             >+</button>
           </div>
+          {/* Wake lock indicator */}
+          {wakeLockActive && (
+            <span title="Scherm blijft aan" className="text-base leading-none">💡</span>
+          )}
           {/* Ingrediënten */}
           <button
             onClick={() => setShowIngredients(true)}
