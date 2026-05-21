@@ -41,7 +41,23 @@ export default function ReceptDetail({ recipe }: { recipe: Recipe }) {
   const [showPlanner, setShowPlanner] = useState(false)
   const [plannerLoading, setPlannerLoading] = useState<string | null>(null)
   const [plannerDone, setPlannerDone] = useState<string | null>(null)
+  const [pantryItems, setPantryItems] = useState<{ name: string; quantity: number }[]>([])
   const notesTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Laad pantry items voor "in huis" check
+  useEffect(() => {
+    const supabase = createClient()
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return
+      supabase.from('profiles').select('household_id').eq('id', user.id).single()
+        .then(({ data: profile }) => {
+          if (!profile?.household_id) return
+          supabase.from('pantry_items').select('name, quantity')
+            .eq('household_id', profile.household_id)
+            .then(({ data }) => { if (data) setPantryItems(data) })
+        })
+    })
+  }, [])
 
   const days = Array.from({ length: 7 }, (_, i) => {
     const d = new Date()
@@ -85,6 +101,14 @@ export default function ReceptDetail({ recipe }: { recipe: Recipe }) {
     if (isNaN(num)) return amount
     const scaled = num * ratio
     return scaled % 1 === 0 ? scaled.toString() : scaled.toFixed(1)
+  }
+
+  function isInPantry(ingredientName: string): boolean {
+    const needle = ingredientName.toLowerCase().trim()
+    return pantryItems.some(p => {
+      const hay = p.name.toLowerCase().trim()
+      return hay.includes(needle) || needle.includes(hay)
+    })
   }
 
   async function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -236,14 +260,35 @@ export default function ReceptDetail({ recipe }: { recipe: Recipe }) {
 
         {/* Ingredients */}
         <div>
-          <h2 className="font-semibold mb-3">Ingrediënten</h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-semibold">Ingrediënten</h2>
+            {pantryItems.length > 0 && (() => {
+              const inHuis = (recipe.ingredients as Ingredient[]).filter(ing => isInPantry(ing.name)).length
+              const total = (recipe.ingredients as Ingredient[]).length
+              return (
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                  inHuis === total ? 'bg-green-100 text-green-700' :
+                  inHuis > 0 ? 'bg-orange-100 text-orange-700' :
+                  'bg-stone-100 text-stone-500'
+                }`}>
+                  {inHuis}/{total} in huis
+                </span>
+              )
+            })()}
+          </div>
           <ul className="space-y-2">
-            {(recipe.ingredients as Ingredient[]).map((ing, i) => (
-              <li key={i} className="flex justify-between text-sm border-b border-stone-100 pb-2">
-                <span className="text-stone-700">{ing.name}</span>
-                <span className="text-stone-500 font-medium">{scaleAmount(ing.amount)} {ing.unit}</span>
-              </li>
-            ))}
+            {(recipe.ingredients as Ingredient[]).map((ing, i) => {
+              const inHuis = isInPantry(ing.name)
+              return (
+                <li key={i} className="flex justify-between text-sm border-b border-stone-100 pb-2">
+                  <span className={`flex items-center gap-1.5 ${inHuis ? 'text-green-700' : 'text-stone-700'}`}>
+                    {inHuis && <span className="text-green-500 text-xs leading-none">✓</span>}
+                    {ing.name}
+                  </span>
+                  <span className="text-stone-500 font-medium">{scaleAmount(ing.amount)} {ing.unit}</span>
+                </li>
+              )
+            })}
           </ul>
         </div>
 
@@ -354,6 +399,9 @@ function KookstandView({
   const isLast = activeStep === steps.length - 1
   const [showIngredients, setShowIngredients] = useState(false)
   const [wakeLockActive, setWakeLockActive] = useState(false)
+  const [showCookDone, setShowCookDone] = useState(false)
+  const [deducting, setDeducting] = useState(false)
+  const toast = useToast()
 
   // Houd scherm wakker tijdens kookstand
   useEffect(() => {
@@ -417,6 +465,40 @@ function KookstandView({
   function removeTimer(id: string) {
     setTimers(ts => ts.filter(t => t.id !== id))
     sendSwMessage({ type: 'CANCEL_TIMER', id })
+  }
+
+  async function deductAndExit() {
+    setDeducting(true)
+    try {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      const { data: profile } = await supabase.from('profiles').select('household_id').eq('id', user!.id).single()
+      const { data: pantry } = await supabase.from('pantry_items')
+        .select('id, name, quantity')
+        .eq('household_id', profile!.household_id)
+
+      const ratio = servings / recipe.servings
+      const ingredients = recipe.ingredients as { name: string; amount: string; unit: string }[]
+
+      for (const ing of ingredients) {
+        const match = pantry?.find(p =>
+          p.name.toLowerCase().includes(ing.name.toLowerCase()) ||
+          ing.name.toLowerCase().includes(p.name.toLowerCase())
+        )
+        if (!match) continue
+        const amt = parseFloat(ing.amount) * ratio
+        if (isNaN(amt) || amt <= 0) continue
+        const newQty = match.quantity - amt
+        if (newQty <= 0.01) {
+          await supabase.from('pantry_items').delete().eq('id', match.id)
+        } else {
+          await supabase.from('pantry_items').update({ quantity: Math.round(newQty * 10) / 10 }).eq('id', match.id)
+        }
+      }
+      toast('🧺 Pantry bijgewerkt')
+    } catch { /* silently ignore */ }
+    setDeducting(false)
+    onExit()
   }
 
   // Tick elke seconde zolang er timers actief zijn
@@ -586,7 +668,7 @@ function KookstandView({
           </button>
         )}
         <button
-          onClick={() => isLast ? onExit() : setActiveStep(activeStep + 1)}
+          onClick={() => isLast ? setShowCookDone(true) : setActiveStep(activeStep + 1)}
           className="flex-1 py-4 bg-orange-500 rounded-2xl font-medium"
         >
           {isLast ? '✓ Klaar' : 'Volgende →'}
@@ -631,6 +713,28 @@ function KookstandView({
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {showCookDone && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-end">
+          <div className="bg-stone-800 w-full rounded-t-3xl p-6 space-y-4">
+            <h2 className="font-semibold text-white text-lg">Goed gekookt! 🎉</h2>
+            <p className="text-stone-400 text-sm">Wil je de gebruikte ingrediënten van je pantry aftrekken?</p>
+            <button
+              onClick={deductAndExit}
+              disabled={deducting}
+              className="w-full py-3.5 bg-orange-500 text-white font-medium rounded-2xl disabled:opacity-50"
+            >
+              {deducting ? 'Bezig...' : '🧺 Ja, pantry bijwerken'}
+            </button>
+            <button
+              onClick={onExit}
+              className="w-full py-3 text-stone-400 text-sm"
+            >
+              Overslaan
+            </button>
           </div>
         </div>
       )}

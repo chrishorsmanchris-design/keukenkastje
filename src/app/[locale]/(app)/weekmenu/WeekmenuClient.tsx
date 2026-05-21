@@ -28,16 +28,17 @@ function getShortDate(dateStr: string): string {
 }
 
 type Recipe = { id: string; title: string; image_url?: string; cuisine?: string; servings: number }
-type MenuItem = { id: string; date: string; servings: number; recipe?: Recipe }
+type MenuItem = { id: string; date: string; servings: number; recipe?: Recipe; cook_name?: string }
 
 export default function WeekmenuClient({
-  menuItems, recipes, dates, householdId, role = 'member',
+  menuItems, recipes, dates, householdId, role = 'member', members = [],
 }: {
   menuItems: MenuItem[]
   recipes: Recipe[]
   dates: string[]
   householdId: string
   role?: string
+  members?: { id: string; name: string }[]
 }) {
   const canWrite = role !== 'viewer'
   const router = useRouter()
@@ -142,6 +143,14 @@ export default function WeekmenuClient({
     if (!item) return
     await supabase.from('week_menu').update({ servings }).eq('id', item.id)
     setMenu(m => m.map(x => x.date === date ? { ...x, servings } : x))
+  }
+
+  async function updateCookName(date: string, cookName: string) {
+    const supabase = createClient()
+    const item = menuByDate[date]
+    if (!item) return
+    await supabase.from('week_menu').update({ cook_name: cookName }).eq('id', item.id)
+    setMenu(m => m.map(x => x.date === date ? { ...x, cook_name: cookName } : x))
   }
 
   async function moveToDate(fromDate: string, toDate: string) {
@@ -332,6 +341,21 @@ export default function WeekmenuClient({
                       <p className="text-sm font-medium truncate">{item.recipe.title}</p>
                       {item.recipe.cuisine && (
                         <p className="text-xs text-stone-400">{CUISINE_FLAGS[item.recipe.cuisine] ?? ''} {item.recipe.cuisine}</p>
+                      )}
+                      {members.length > 1 && !moving && canWrite && (
+                        <div className="flex items-center gap-1 mt-0.5" onClick={e => e.stopPropagation()}>
+                          <span className="text-xs text-stone-400">👤</span>
+                          <select
+                            value={item.cook_name ?? ''}
+                            onChange={e => updateCookName(date, e.target.value)}
+                            className="text-xs text-stone-500 bg-transparent border-none outline-none cursor-pointer max-w-[90px] truncate"
+                          >
+                            <option value="">Wie kookt?</option>
+                            {members.map(m => (
+                              <option key={m.id} value={m.name}>{m.name}</option>
+                            ))}
+                          </select>
+                        </div>
                       )}
                     </div>
                   </div>

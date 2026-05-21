@@ -18,7 +18,7 @@ export default async function WeekmenuPage() {
 
   const { data: { user } } = await supabase.auth.getUser()
   const { data: profile } = await supabase.from('profiles').select('household_id, role').eq('id', user!.id).single()
-  const [{ data: menuItems }, { data: recipes }] = await Promise.all([
+  const [{ data: menuItems }, { data: recipes }, { data: members }] = await Promise.all([
     supabase
       .from('week_menu')
       .select('*, recipe:recipes(*)')
@@ -29,7 +29,12 @@ export default async function WeekmenuPage() {
       .from('recipes')
       .select('id, title, image_url, cuisine, servings')
       .order('title'),
+    supabase
+      .from('profiles')
+      .select('id, display_name')
+      .eq('household_id', profile?.household_id ?? '')
+      .order('display_name'),
   ])
 
-  return <WeekmenuClient menuItems={menuItems ?? []} recipes={recipes ?? []} dates={dates} householdId={profile?.household_id ?? ''} role={profile?.role ?? 'member'} />
+  return <WeekmenuClient menuItems={menuItems ?? []} recipes={recipes ?? []} dates={dates} householdId={profile?.household_id ?? ''} role={profile?.role ?? 'member'} members={(members ?? []).map(m => ({ id: m.id, name: m.display_name ?? 'Onbekend' }))} />
 }

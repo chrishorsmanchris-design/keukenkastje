@@ -37,6 +37,16 @@ const PANTRY_CATEGORY_CONFIG: { name: string; icon: string }[] = [
 const PANTRY_CATEGORIES = PANTRY_CATEGORY_CONFIG.map(c => c.name)
 const PANTRY_CATEGORY_ICON = Object.fromEntries(PANTRY_CATEGORY_CONFIG.map(c => [c.name, c.icon]))
 
+function isLowStock(item: PantryItem): boolean {
+  const qty = item.quantity
+  const unit = (item.unit ?? '').toLowerCase().trim()
+  if (unit === 'gram' || unit === 'g') return qty < 100
+  if (unit === 'ml' || unit === 'milliliter') return qty < 100
+  if (unit === 'liter' || unit === 'l') return qty < 0.25
+  if (unit === 'kg' || unit === 'kilogram') return qty < 0.1
+  return qty < 2
+}
+
 function daysUntil(dateStr?: string): number | null {
   if (!dateStr) return null
   const diff = new Date(dateStr).getTime() - new Date().setHours(0,0,0,0)
@@ -253,6 +263,23 @@ export default function PantryClient({ initialItems, householdId, role = 'member
         </div>
       )}
 
+      {/* Bijna op banner */}
+      {(() => {
+        const laag = items.filter(i => isLowStock(i))
+        if (laag.length === 0) return null
+        return (
+          <div className="bg-orange-50 border border-orange-200 rounded-2xl px-4 py-3 flex items-start gap-2">
+            <span className="text-base flex-shrink-0">⚠️</span>
+            <div>
+              <p className="text-sm font-medium text-orange-800">Bijna op ({laag.length})</p>
+              <p className="text-xs text-orange-600 mt-0.5 leading-relaxed">
+                {laag.map(i => i.name).join(', ')}
+              </p>
+            </div>
+          </div>
+        )
+      })()}
+
       {/* Scanned products review */}
       {scanned.length > 0 && (
         <div className="bg-white border border-stone-200 rounded-2xl p-4 space-y-3">
@@ -462,6 +489,9 @@ function PantryRow({ item, rowClass, label, onRemove, onUpdateQuantity, onChange
           </button>
         </div>
 
+        {isLowStock(item) && (
+          <span className="text-orange-400 text-xs flex-shrink-0" title="Bijna op">⚠️</span>
+        )}
         {label && <span className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 ${label.color}`}>{label.text}</span>}
         <button
           onClick={() => setShowPicker(p => !p)}
