@@ -37,6 +37,10 @@ export default function ReceptenClient({ recipes }: { recipes: Recipe[] }) {
     () => new Set(recipes.filter(r => r.is_favorite).map(r => r.id))
   )
 
+  const [shareMode, setShareMode] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [sharing, setSharing] = useState(false)
+
   async function toggleFavorite(id: string, e: React.MouseEvent) {
     e.preventDefault()
     e.stopPropagation()
@@ -58,6 +62,37 @@ export default function ReceptenClient({ recipes }: { recipes: Recipe[] }) {
     setFilterTime(null)
     setOnlyFavorites(false)
     setSearch('')
+  }
+
+  async function shareSelected() {
+    if (!selected.size) return
+    setSharing(true)
+    const ids = [...selected].join(',')
+    const url = `${window.location.origin}/${locale}/share?ids=${ids}`
+    const count = selected.size
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: count === 1 ? '1 recept gedeeld via Keukenkastje' : `${count} recepten gedeeld via Keukenkastje`,
+          text: count === 1 ? 'Bekijk dit recept!' : `Bekijk deze ${count} recepten!`,
+          url,
+        })
+      } else {
+        await navigator.clipboard.writeText(url)
+        alert('Link gekopieerd!')
+      }
+    } catch { /* gebruiker heeft geannuleerd */ }
+    setSharing(false)
+    setShareMode(false)
+    setSelected(new Set())
+  }
+
+  function toggleSelect(id: string) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
   }
 
   const filtered = recipes
@@ -85,13 +120,51 @@ export default function ReceptenClient({ recipes }: { recipes: Recipe[] }) {
     <div className="px-4 pt-10 pb-4 space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Recepten</h1>
-        <Link
-          href={`/${locale}/recepten/nieuw`}
-          className="bg-orange-500 text-white text-sm font-medium px-4 py-2 rounded-full hover:bg-orange-600 transition-colors"
-        >
-          + Nieuw
-        </Link>
+        <div className="flex items-center gap-2">
+          {shareMode ? (
+            <>
+              <button
+                onClick={() => { setShareMode(false); setSelected(new Set()) }}
+                className="text-sm text-stone-400 px-3 py-2"
+              >
+                Annuleren
+              </button>
+              <button
+                onClick={shareSelected}
+                disabled={!selected.size || sharing}
+                className="bg-orange-500 text-white text-sm font-medium px-4 py-2 rounded-full hover:bg-orange-600 transition-colors disabled:opacity-40"
+              >
+                {sharing ? '…' : `Deel${selected.size > 0 ? ` (${selected.size})` : ''}`}
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => setShareMode(true)}
+                className="text-sm text-stone-500 px-3 py-2 rounded-full border border-stone-200 hover:bg-stone-50 transition-colors"
+              >
+                Selecteer
+              </button>
+              <Link
+                href={`/${locale}/recepten/nieuw`}
+                className="bg-orange-500 text-white text-sm font-medium px-4 py-2 rounded-full hover:bg-orange-600 transition-colors"
+              >
+                + Nieuw
+              </Link>
+            </>
+          )}
+        </div>
       </div>
+
+      {/* Share mode banner */}
+      {shareMode && (
+        <div className="bg-orange-50 border border-orange-200 rounded-2xl px-4 py-2.5 text-sm text-orange-700 flex items-center justify-between">
+          <span>{selected.size === 0 ? 'Tik op recepten om te selecteren' : `${selected.size} geselecteerd`}</span>
+          {selected.size > 0 && (
+            <button onClick={() => setSelected(new Set())} className="text-orange-400 text-xs">Wis selectie</button>
+          )}
+        </div>
+      )}
 
       {/* Search */}
       <input
@@ -208,6 +281,9 @@ export default function ReceptenClient({ recipes }: { recipes: Recipe[] }) {
                 locale={locale as string}
                 isFavorite={favorites.has(recipe.id)}
                 onToggleFavorite={toggleFavorite}
+                shareMode={shareMode}
+                selected={selected.has(recipe.id)}
+                onToggleSelect={toggleSelect}
               />
             ))}
           </div>
@@ -218,16 +294,25 @@ export default function ReceptenClient({ recipes }: { recipes: Recipe[] }) {
 }
 
 function RecipeCard({
-  recipe, locale, isFavorite, onToggleFavorite,
+  recipe, locale, isFavorite, onToggleFavorite, shareMode, selected, onToggleSelect,
 }: {
   recipe: Recipe
   locale: string
   isFavorite: boolean
   onToggleFavorite: (id: string, e: React.MouseEvent) => void
+  shareMode?: boolean
+  selected?: boolean
+  onToggleSelect?: (id: string) => void
 }) {
   const totalTime = (recipe.prep_time_minutes ?? 0) + (recipe.cook_time_minutes ?? 0)
-  return (
-    <Link href={`/${locale}/recepten/${recipe.id}`} className="bg-white rounded-2xl overflow-hidden border border-stone-100 hover:shadow-md transition-shadow relative">
+  const cardClass = `bg-white rounded-2xl overflow-hidden border transition-all relative ${
+    shareMode
+      ? selected ? 'border-orange-400 ring-2 ring-orange-400 shadow-md' : 'border-stone-200'
+      : 'border-stone-100 hover:shadow-md'
+  }`
+
+  const inner = (
+    <>
       {recipe.image_url ? (
         <div className="relative w-full h-28">
           <Image src={recipe.image_url} alt={recipe.title} fill className="object-cover" sizes="(max-width: 768px) 50vw, 200px" />
@@ -235,14 +320,20 @@ function RecipeCard({
       ) : (
         <div className="w-full h-28 bg-stone-100 flex items-center justify-center text-3xl">🍽️</div>
       )}
-      {/* Heart button */}
-      <button
-        onClick={e => onToggleFavorite(recipe.id, e)}
-        className="absolute top-2 right-2 w-7 h-7 bg-white/80 backdrop-blur-sm rounded-full flex items-center justify-center shadow-sm hover:scale-110 transition-transform"
-        aria-label={isFavorite ? 'Verwijder favoriet' : 'Voeg toe aan favorieten'}
-      >
-        <span className="text-base leading-none">{isFavorite ? '❤️' : '🤍'}</span>
-      </button>
+      {shareMode ? (
+        <div className={`absolute top-2 right-2 w-7 h-7 rounded-full border-2 flex items-center justify-center ${
+          selected ? 'bg-orange-500 border-orange-500' : 'bg-white/80 border-stone-300'
+        }`}>
+          {selected && <span className="text-white text-xs font-bold">✓</span>}
+        </div>
+      ) : (
+        <button
+          onClick={e => onToggleFavorite(recipe.id, e)}
+          className="absolute top-2 right-2 w-7 h-7 bg-white/80 backdrop-blur-sm rounded-full flex items-center justify-center shadow-sm hover:scale-110 transition-transform"
+        >
+          <span className="text-base leading-none">{isFavorite ? '❤️' : '🤍'}</span>
+        </button>
+      )}
       <div className="p-3">
         <p className="font-medium text-sm leading-tight line-clamp-2 pr-1">{recipe.title}</p>
         <div className="flex items-center gap-2 mt-1.5">
@@ -250,6 +341,11 @@ function RecipeCard({
           {totalTime > 0 && <span className="text-xs text-stone-400">{totalTime} min</span>}
         </div>
       </div>
-    </Link>
+    </>
   )
+
+  if (shareMode) {
+    return <div className={cardClass} onClick={() => onToggleSelect?.(recipe.id)}>{inner}</div>
+  }
+  return <Link href={`/${locale}/recepten/${recipe.id}`} className={cardClass}>{inner}</Link>
 }
