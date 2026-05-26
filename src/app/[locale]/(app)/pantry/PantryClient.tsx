@@ -201,6 +201,12 @@ export default function PantryClient({ initialItems, householdId, role = 'member
     await supabase.from('pantry_items').update({ quantity }).eq('id', id)
   }, []) // eslint-disable-line
 
+  const updateExpiry = useCallback(async (id: string, expires_at: string) => {
+    setItems(prev => prev.map(i => i.id === id ? { ...i, expires_at: expires_at || undefined } : i))
+    const supabase = createClient()
+    await supabase.from('pantry_items').update({ expires_at: expires_at || null }).eq('id', id)
+  }, [])
+
   const changeCategory = useCallback(async (id: string, category: string) => {
     setItems(prev => prev.map(i => i.id === id ? { ...i, category } : i))
     const supabase = createClient()
@@ -359,6 +365,7 @@ export default function PantryClient({ initialItems, householdId, role = 'member
                         onUpdateQuantity={updateQuantity}
                         onChangeCategory={changeCategory}
                         onRename={canWrite ? renameName : undefined}
+                        onUpdateExpiry={canWrite ? updateExpiry : undefined}
                       />
                     )
                   })}
@@ -424,7 +431,7 @@ export default function PantryClient({ initialItems, householdId, role = 'member
 
 // ─── PantryRow ────────────────────────────────────────────────────────────────
 
-function PantryRow({ item, rowClass, label, onRemove, onUpdateQuantity, onChangeCategory, onRename }: {
+function PantryRow({ item, rowClass, label, onRemove, onUpdateQuantity, onChangeCategory, onRename, onUpdateExpiry }: {
   item: PantryItem
   rowClass: string
   label: { text: string; color: string } | null
@@ -432,9 +439,11 @@ function PantryRow({ item, rowClass, label, onRemove, onUpdateQuantity, onChange
   onUpdateQuantity: (id: string, qty: number) => void
   onChangeCategory: (id: string, category: string) => void
   onRename?: (id: string, name: string) => void
+  onUpdateExpiry?: (id: string, date: string) => void
 }) {
   const [showPicker, setShowPicker] = useState(false)
   const [editingName, setEditingName] = useState(false)
+  const [editingExpiry, setEditingExpiry] = useState(false)
   const [nameValue, setNameValue] = useState(item.name)
   const currentCat = item.category ?? categorize(item.name)
 
@@ -493,7 +502,27 @@ function PantryRow({ item, rowClass, label, onRemove, onUpdateQuantity, onChange
         {isLowStock(item) && (
           <span className="text-orange-400 text-xs flex-shrink-0" title="Bijna op">⚠️</span>
         )}
-        {label && <span className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 ${label.color}`}>{label.text}</span>}
+        {/* Datum-badge: klikbaar om te bewerken */}
+        {editingExpiry ? (
+          <input
+            type="date"
+            autoFocus
+            defaultValue={item.expires_at?.split('T')[0] ?? ''}
+            onBlur={e => { onUpdateExpiry?.(item.id, e.target.value); setEditingExpiry(false) }}
+            onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') setEditingExpiry(false) }}
+            className="text-xs border border-orange-300 rounded-lg px-1.5 py-0.5 outline-none flex-shrink-0 w-32"
+          />
+        ) : (
+          <button
+            onClick={() => onUpdateExpiry && setEditingExpiry(true)}
+            className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 transition-colors ${
+              label ? label.color : 'text-stone-300 hover:text-stone-500'
+            } ${onUpdateExpiry ? 'cursor-pointer' : ''}`}
+            title={onUpdateExpiry ? 'Klik om datum te wijzigen' : undefined}
+          >
+            {label ? label.text : '+ datum'}
+          </button>
+        )}
         <button
           onClick={() => setShowPicker(p => !p)}
           className="text-xs text-stone-300 hover:text-stone-500 flex-shrink-0 px-1"

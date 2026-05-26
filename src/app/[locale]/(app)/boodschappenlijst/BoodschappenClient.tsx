@@ -25,14 +25,16 @@ const CATEGORIES = CATEGORY_CONFIG.map(c => c.name)
 
 function categorize(name: string): string {
   const n = name.toLowerCase()
-  if (/tomaat|paprika|\bui\b|uien|knoflook|wortel|sla\b|spinazie|broccoli|courgette|aubergine|avocado|citroen|limoen|appel|peer|banaan|aardappel|zoete aardappel|venkel|komkommer|prei|champignon|paddenstoel/.test(n)) return 'Groente & fruit'
-  if (/kip|rund|vark|gehakt|zalm|vis\b|garnaal|tonijn|spek|chorizo|bacon|ham|worst/.test(n)) return 'Vlees & vis'
-  if (/melk|kaas|boter|room|yoghurt|kwark|ei\b|eieren|mozzarella|parmezaan|ricotta|creme fraiche|feta/.test(n)) return 'Zuivel & eieren'
-  if (/brood|baguette|ciabatta|pita|tortilla|wrap|bagel|stokbrood/.test(n)) return 'Brood & bakkerij'
-  if (/pasta|spaghetti|penne|tagliatelle|rijst|couscous|quinoa|noodle|mie\b|bloem|havermout/.test(n)) return 'Pasta & rijst'
+  // Gebruik stam-matching zodat zowel enkelvoud als meervoud matcht
+  // (tomaat/tomaten, banaan/bananen, peer/peren, ui/uien etc.)
+  if (/tomat|paprika|\bui\b|uien|knoflook|wortel|sla\b|spinazie|broccoli|courgett|aubergine|avocado|citroen|limoen|appel|peren\b|peer\b|banan|aardappel|venkel|komkommer|prei|champignon|paddenstoel|aardbei|framboos|bosbes|mango|ananas|druif|kers\b|kersen|pruim|abrikoos|perzik|gember|wortel|mais|erwtjes|boontjes|asperge|kool|spruitjes/.test(n)) return 'Groente & fruit'
+  if (/kip|rund|vark|gehakt|zalm|vis\b|garnaal|tonijn|spek|chorizo|bacon|ham\b|worst/.test(n)) return 'Vlees & vis'
+  if (/melk|kaas|boter|room\b|yoghurt|kwark|ei\b|eieren|mozzarella|parmezaan|ricotta|creme fraiche|feta|halloumi/.test(n)) return 'Zuivel & eieren'
+  if (/brood|baguette|ciabatta|pita|tortilla|wrap|bagel|stokbrood|croissant/.test(n)) return 'Brood & bakkerij'
+  if (/pasta|spaghetti|penne|tagliatelle|rijst|couscous|quinoa|noodle|mie\b|bloem|havermout|lasagne/.test(n)) return 'Pasta & rijst'
   if (/blik|pot\b|kikkererwt|linzen|boon\b|bonen|tomatenblok|kokosmelk|olijven/.test(n)) return 'Blikken & potten'
-  if (/olie|azijn|sojasaus|tahini|pesto|mosterd|ketchup|zout|peper\b|komijn|kurkuma|oregano|basilicum|tijm|rozemarijn|kaneel|honing|suiker/.test(n)) return 'Sauzen & kruiden'
-  if (/water|sap\b|wijn|bier|cola|thee|koffie/.test(n)) return 'Dranken'
+  if (/olie|azijn|sojasaus|tahini|pesto|mosterd|ketchup|zout|peper\b|komijn|kurkuma|oregano|basilicum|tijm|rozemarijn|kaneel|honing|suiker|sambal|ketjap/.test(n)) return 'Sauzen & kruiden'
+  if (/water|sap\b|wijn|bier|cola|thee|koffie|limonade/.test(n)) return 'Dranken'
   if (/diepvries|bevroren/.test(n)) return 'Diepvries'
   if (/shampoo|zeep|tandpasta|wasmiddel|schoonmaak|toilet|tissues/.test(n)) return 'Persoonlijke verzorging'
   return 'Overig'
@@ -312,7 +314,8 @@ export default function BoodschappenClient({ initialItems, householdId, role = '
 
   const grouped: Record<string, ShoppingItem[]> = {}
   for (const item of unchecked) {
-    const cat = item.category ?? categorize(item.name)
+    // Herclassificeer items die (door oude regex) als 'Overig' zijn opgeslagen
+    const cat = (!item.category || item.category === 'Overig') ? categorize(item.name) : item.category
     if (!grouped[cat]) grouped[cat] = []
     grouped[cat].push(item)
   }

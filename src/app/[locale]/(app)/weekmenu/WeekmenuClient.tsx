@@ -28,7 +28,7 @@ function getShortDate(dateStr: string): string {
 }
 
 type Recipe = { id: string; title: string; image_url?: string; cuisine?: string; servings: number }
-type MenuItem = { id: string; date: string; servings: number; recipe?: Recipe; cook_name?: string }
+type MenuItem = { id: string; date: string; servings: number; recipe?: Recipe; cook_name?: string; notes?: string }
 
 export default function WeekmenuClient({
   menuItems, recipes, dates, householdId, role = 'member', members = [],
@@ -151,6 +151,14 @@ export default function WeekmenuClient({
     if (!item) return
     await supabase.from('week_menu').update({ cook_name: cookName }).eq('id', item.id)
     setMenu(m => m.map(x => x.date === date ? { ...x, cook_name: cookName } : x))
+  }
+
+  async function updateNotes(date: string, notes: string) {
+    const supabase = createClient()
+    const item = menuByDate[date]
+    if (!item) return
+    await supabase.from('week_menu').update({ notes }).eq('id', item.id)
+    setMenu(m => m.map(x => x.date === date ? { ...x, notes } : x))
   }
 
   async function moveToDate(fromDate: string, toDate: string) {
@@ -381,6 +389,21 @@ export default function WeekmenuClient({
                 <div className="mt-2 w-full text-sm text-stone-300 border border-dashed border-stone-100 rounded-xl py-2.5 text-center">
                   Vrij
                 </div>
+              )}
+              {/* Notitie per dag */}
+              {canWrite && !moving && (
+                <div className="mt-2" onClick={e => e.stopPropagation()}>
+                  <input
+                    type="text"
+                    value={item?.notes ?? ''}
+                    onChange={e => updateNotes(date, e.target.value)}
+                    placeholder="📝 Notitie toevoegen…"
+                    className="w-full text-xs text-stone-500 placeholder-stone-300 bg-transparent outline-none border-none px-0 py-0.5"
+                  />
+                </div>
+              )}
+              {!canWrite && item?.notes && (
+                <p className="mt-2 text-xs text-stone-400 px-0.5">📝 {item.notes}</p>
               )}
             </div>
           )
