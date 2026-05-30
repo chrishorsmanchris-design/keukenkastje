@@ -17,7 +17,34 @@ export default function WachtwoordResetPage() {
   useEffect(() => {
     const supabase = createClient()
 
-    // Implicit flow: Supabase verwerkt #access_token automatisch en vuurt PASSWORD_RECOVERY
+    // 1. Implicit flow: #access_token=...&type=recovery in de hash
+    const hashParams = new URLSearchParams(window.location.hash.substring(1))
+    const accessToken = hashParams.get('access_token')
+    const refreshToken = hashParams.get('refresh_token') ?? ''
+    const type = hashParams.get('type')
+
+    if (accessToken && type === 'recovery') {
+      supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
+        .then(({ error }) => {
+          if (error) setError('Deze link is verlopen of ongeldig. Vraag een nieuwe aan.')
+          else setSessionReady(true)
+          setSessionLoading(false)
+        })
+      return
+    }
+
+    // 2. PKCE flow: ?code=... in de query string
+    const code = new URLSearchParams(window.location.search).get('code')
+    if (code) {
+      supabase.auth.exchangeCodeForSession(code).then(({ error }) => {
+        if (error) setError('Deze link is verlopen of ongeldig. Vraag een nieuwe aan.')
+        else setSessionReady(true)
+        setSessionLoading(false)
+      })
+      return
+    }
+
+    // 3. Fallback: luister naar auth state change
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'PASSWORD_RECOVERY' || (event === 'SIGNED_IN' && session)) {
         setSessionReady(true)
@@ -25,13 +52,8 @@ export default function WachtwoordResetPage() {
       }
     })
 
-    // Na 4s stoppen met wachten als er geen sessie komt
     const timeout = setTimeout(() => setSessionLoading(false), 4000)
-
-    return () => {
-      subscription.unsubscribe()
-      clearTimeout(timeout)
-    }
+    return () => { subscription.unsubscribe(); clearTimeout(timeout) }
   }, [])
 
   async function handleSubmit(e: React.FormEvent) {
