@@ -17,22 +17,7 @@ export default function WachtwoordResetPage() {
   useEffect(() => {
     const supabase = createClient()
 
-    // PKCE flow: URL bevat ?code=... → wissel in voor sessie
-    const code = new URLSearchParams(window.location.search).get('code')
-    if (code) {
-      supabase.auth.exchangeCodeForSession(code).then(({ error }) => {
-        if (error) {
-          setError('Deze link is verlopen of ongeldig. Vraag een nieuwe aan via Wachtwoord vergeten.')
-        } else {
-          setSessionReady(true)
-        }
-        setSessionLoading(false)
-      })
-      return
-    }
-
-    // Implicit flow: hash bevat #access_token + type=recovery
-    // Supabase client verwerkt de hash automatisch en vuurt PASSWORD_RECOVERY
+    // Implicit flow: Supabase verwerkt #access_token automatisch en vuurt PASSWORD_RECOVERY
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'PASSWORD_RECOVERY' || (event === 'SIGNED_IN' && session)) {
         setSessionReady(true)
@@ -40,18 +25,13 @@ export default function WachtwoordResetPage() {
       }
     })
 
-    // Als de pagina al een sessie heeft (bijv. na page refresh)
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        setSessionReady(true)
-        setSessionLoading(false)
-      } else if (!code) {
-        // Geen code, geen sessie — na 3s stoppen met wachten
-        setTimeout(() => setSessionLoading(false), 3000)
-      }
-    })
+    // Na 4s stoppen met wachten als er geen sessie komt
+    const timeout = setTimeout(() => setSessionLoading(false), 4000)
 
-    return () => subscription.unsubscribe()
+    return () => {
+      subscription.unsubscribe()
+      clearTimeout(timeout)
+    }
   }, [])
 
   async function handleSubmit(e: React.FormEvent) {

@@ -1,6 +1,7 @@
 import BottomNav from '@/components/BottomNav'
 import { Providers } from '@/components/Providers'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 
@@ -17,14 +18,34 @@ export default async function AppLayout({ children, params }: { children: React.
   try {
     const { data: profile } = await supabase
       .from('profiles')
-      .select('household_id, household:households(name)')
+      .select('household_id, display_name, household:households(name)')
       .eq('id', user.id)
       .single()
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const raw = profile?.household as any
-    householdName = (Array.isArray(raw) ? raw[0]?.name : raw?.name) ?? null
-    const householdId = profile?.household_id
+    // Nieuwe gebruiker zonder huishouden → automatisch aanmaken via admin (bypasses RLS)
+    let householdId = profile?.household_id
+    if (!householdId) {
+      const admin = createAdminClient()
+      const displayName = profile?.display_name ?? user.email?.split('@')[0] ?? 'Mijn'
+      const { data: newHousehold } = await admin
+        .from('households')
+        .insert({ name: `${displayName}'s keuken` })
+        .select('id')
+        .single()
+      if (newHousehold) {
+        householdId = newHousehold.id
+        await admin
+          .from('profiles')
+          .update({ household_id: newHousehold.id, is_owner: true })
+          .eq('id', user.id)
+        householdName = `${displayName}'s keuken`
+      }
+    } else {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const raw = profile?.household as any
+      householdName = (Array.isArray(raw) ? raw[0]?.name : raw?.name) ?? null
+    }
+
     if (householdId) {
       const { data: m } = await supabase
         .from('profiles')
