@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 
@@ -11,6 +11,48 @@ export default function WachtwoordResetPage() {
   const [confirm, setConfirm] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [sessionReady, setSessionReady] = useState(false)
+  const [sessionLoading, setSessionLoading] = useState(true)
+
+  useEffect(() => {
+    const supabase = createClient()
+
+    // PKCE flow: URL bevat ?code=... → wissel in voor sessie
+    const code = new URLSearchParams(window.location.search).get('code')
+    if (code) {
+      supabase.auth.exchangeCodeForSession(code).then(({ error }) => {
+        if (error) {
+          setError('Deze link is verlopen of ongeldig. Vraag een nieuwe aan via Wachtwoord vergeten.')
+        } else {
+          setSessionReady(true)
+        }
+        setSessionLoading(false)
+      })
+      return
+    }
+
+    // Implicit flow: hash bevat #access_token + type=recovery
+    // Supabase client verwerkt de hash automatisch en vuurt PASSWORD_RECOVERY
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY' || (event === 'SIGNED_IN' && session)) {
+        setSessionReady(true)
+        setSessionLoading(false)
+      }
+    })
+
+    // Als de pagina al een sessie heeft (bijv. na page refresh)
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        setSessionReady(true)
+        setSessionLoading(false)
+      } else if (!code) {
+        // Geen code, geen sessie — na 3s stoppen met wachten
+        setTimeout(() => setSessionLoading(false), 3000)
+      }
+    })
+
+    return () => subscription.unsubscribe()
+  }, [])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -33,36 +75,55 @@ export default function WachtwoordResetPage() {
           <p className="text-stone-500 text-sm mt-1">Kies een nieuw wachtwoord</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-3">
-          {[
-            { label: 'Nieuw wachtwoord', value: password, onChange: setPassword, placeholder: 'Minimaal 8 tekens' },
-            { label: 'Bevestig wachtwoord', value: confirm, onChange: setConfirm, placeholder: '••••••••' },
-          ].map(({ label, value, onChange, placeholder }) => (
-            <div key={label} className="space-y-1">
-              <label className="text-xs font-medium text-stone-500 uppercase tracking-wide">{label}</label>
-              <input
-                type="password"
-                required
-                placeholder={placeholder}
-                value={value}
-                onChange={e => onChange(e.target.value)}
-                className="w-full px-4 py-3 rounded-2xl border border-stone-200 bg-white text-sm outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent"
-              />
+        {sessionLoading ? (
+          <div className="text-center py-8 text-stone-400">
+            <div className="animate-spin text-2xl mb-2">⏳</div>
+            <p className="text-sm">Link verifiëren…</p>
+          </div>
+        ) : !sessionReady ? (
+          <div className="space-y-4">
+            <div className="p-4 bg-red-50 border border-red-200 rounded-2xl text-sm text-red-700">
+              {error || 'Deze link is verlopen of al gebruikt. Vraag een nieuwe aan.'}
             </div>
-          ))}
+            <button
+              onClick={() => router.push(`/${locale}/wachtwoord-vergeten`)}
+              className="w-full py-3 rounded-2xl bg-orange-500 text-white text-sm font-medium hover:bg-orange-600 transition-colors"
+            >
+              Nieuwe link aanvragen
+            </button>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-3">
+            {[
+              { label: 'Nieuw wachtwoord', value: password, onChange: setPassword, placeholder: 'Minimaal 8 tekens' },
+              { label: 'Bevestig wachtwoord', value: confirm, onChange: setConfirm, placeholder: '••••••••' },
+            ].map(({ label, value, onChange, placeholder }) => (
+              <div key={label} className="space-y-1">
+                <label className="text-xs font-medium text-stone-500 uppercase tracking-wide">{label}</label>
+                <input
+                  type="password"
+                  required
+                  placeholder={placeholder}
+                  value={value}
+                  onChange={e => onChange(e.target.value)}
+                  className="w-full px-4 py-3 rounded-2xl border border-stone-200 bg-white text-sm outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent"
+                />
+              </div>
+            ))}
 
-          {error && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-2xl text-sm text-red-700">{error}</div>
-          )}
+            {error && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-2xl text-sm text-red-700">{error}</div>
+            )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-3 rounded-2xl bg-orange-500 text-white text-sm font-medium hover:bg-orange-600 transition-colors disabled:opacity-50"
-          >
-            {loading ? 'Bezig...' : 'Wachtwoord opslaan'}
-          </button>
-        </form>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-3 rounded-2xl bg-orange-500 text-white text-sm font-medium hover:bg-orange-600 transition-colors disabled:opacity-50"
+            >
+              {loading ? 'Bezig...' : 'Wachtwoord opslaan'}
+            </button>
+          </form>
+        )}
       </div>
     </div>
   )
