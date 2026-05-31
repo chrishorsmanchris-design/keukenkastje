@@ -609,6 +609,34 @@ function KookstandView({
         <p className="text-orange-400 text-sm font-medium mb-4">Stap {activeStep + 1} van {steps.length}</p>
         <p className="text-2xl leading-relaxed font-medium">{step.text}</p>
 
+        {/* Relevante ingrediënten voor deze stap */}
+        {(() => {
+          const stepLower = step.text.toLowerCase()
+          const relevant = (recipe.ingredients as Ingredient[]).filter(ing =>
+            stepLower.includes(ing.name.toLowerCase())
+          )
+          if (relevant.length === 0) return null
+          return (
+            <div className="flex flex-wrap gap-2 mt-5">
+              {relevant.map((ing, i) => {
+                const scaled = scaleAmount(ing.amount)
+                const hasAmount = ing.amount && !isNaN(parseFloat(ing.amount))
+                return (
+                  <div key={i} className="flex items-baseline gap-1 bg-stone-800 rounded-full px-3.5 py-2">
+                    {hasAmount && (
+                      <span className="text-orange-400 font-bold text-base tabular-nums leading-none">{scaled}</span>
+                    )}
+                    {ing.unit && hasAmount && (
+                      <span className="text-orange-300/60 text-xs font-medium leading-none">{ing.unit}</span>
+                    )}
+                    <span className="text-stone-300 text-sm leading-none ml-1">{ing.name}</span>
+                  </div>
+                )
+              })}
+            </div>
+          )
+        })()}
+
         {step.timer_minutes && (
           <div className="mt-8">
             {currentTimer ? (
