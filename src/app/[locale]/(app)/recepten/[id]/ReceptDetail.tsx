@@ -611,10 +611,22 @@ function KookstandView({
 
         {/* Relevante ingrediënten voor deze stap */}
         {(() => {
+          const stopWords = new Set(['een', 'het', 'van', 'met', 'dat', 'dan', 'toe', 'voor', 'door', 'aan', 'uit', 'over', 'maar', 'ook', 'als', 'wat', 'dit', 'zet', 'voeg', 'roer', 'bak', 'kook', 'laat', 'haal', 'snij', 'snijd'])
           const stepLower = step.text.toLowerCase()
-          const relevant = (recipe.ingredients as Ingredient[]).filter(ing =>
-            stepLower.includes(ing.name.toLowerCase())
-          )
+
+          function mentionedInStep(ingName: string): boolean {
+            const n = ingName.toLowerCase()
+            if (stepLower.includes(n)) return true
+            // Woorden uit ingrediëntnaam in staptekst ("verse salie" → "salie")
+            const ingWords = n.split(/\s+/).filter(w => w.length >= 4 && !stopWords.has(w))
+            if (ingWords.some(w => stepLower.includes(w))) return true
+            // Woorden uit staptekst in ingrediëntnaam ("boter" → "roomboter")
+            const stepWords = stepLower.split(/\W+/).filter(w => w.length >= 4 && !stopWords.has(w))
+            if (stepWords.some(w => n.includes(w))) return true
+            return false
+          }
+
+          const relevant = (recipe.ingredients as Ingredient[]).filter(ing => mentionedInStep(ing.name))
           if (relevant.length === 0) return null
           return (
             <div className="flex flex-wrap gap-2 mt-5">
