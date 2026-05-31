@@ -572,10 +572,11 @@ function KookstandView({
           {/* Ingrediënten */}
           <button
             onClick={() => setShowIngredients(true)}
-            className="text-stone-400 hover:text-white text-sm transition-colors"
+            className="flex items-center gap-1.5 bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-white text-xs font-medium px-3 py-1.5 rounded-full transition-colors"
             title="Ingrediënten bekijken"
           >
-            📋
+            <span>📋</span>
+            <span>{(recipe.ingredients as Ingredient[]).length}</span>
           </button>
           <button onClick={onExit} className="text-stone-400 text-sm">Sluiten</button>
         </div>
@@ -682,36 +683,51 @@ function KookstandView({
           onClick={() => setShowIngredients(false)}
         >
           <div
-            className="bg-stone-800 w-full rounded-t-3xl p-6 max-h-[70vh] flex flex-col"
+            className="bg-stone-900 w-full rounded-t-3xl max-h-[78vh] flex flex-col"
             onClick={e => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="font-semibold text-white">Ingrediënten</h2>
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-stone-800">
+              <h2 className="font-semibold text-white text-base">Ingrediënten</h2>
               <div className="flex items-center gap-3">
-                {/* Personen inline */}
-                <div className="flex items-center gap-2 bg-stone-700 rounded-full px-3 py-1">
+                <div className="flex items-center gap-2 bg-stone-800 rounded-full px-3 py-1.5">
                   <button
                     onClick={() => onServingsChange(Math.max(1, servings - 1))}
-                    className="w-5 h-5 flex items-center justify-center text-stone-400 hover:text-white"
+                    className="w-5 h-5 flex items-center justify-center text-stone-400 hover:text-white text-base leading-none"
                   >−</button>
-                  <span className="text-xs font-medium text-white tabular-nums">{servings} personen</span>
+                  <span className="text-sm font-medium text-white tabular-nums w-12 text-center">
+                    {servings} {servings === 1 ? 'pers.' : 'pers.'}
+                  </span>
                   <button
                     onClick={() => onServingsChange(servings + 1)}
-                    className="w-5 h-5 flex items-center justify-center text-stone-400 hover:text-white"
+                    className="w-5 h-5 flex items-center justify-center text-stone-400 hover:text-white text-base leading-none"
                   >+</button>
                 </div>
-                <button onClick={() => setShowIngredients(false)} className="text-stone-400">✕</button>
+                <button onClick={() => setShowIngredients(false)} className="text-stone-500 hover:text-white text-lg leading-none">✕</button>
               </div>
             </div>
-            <div className="overflow-y-auto space-y-2">
-              {(recipe.ingredients as Ingredient[]).map((ing, i) => (
-                <div key={i} className="flex justify-between text-sm border-b border-stone-700 pb-2">
-                  <span className="text-stone-200">{ing.name}</span>
-                  <span className="text-orange-300 font-medium tabular-nums">
-                    {scaleAmount(ing.amount)} {ing.unit}
-                  </span>
-                </div>
-              ))}
+
+            {/* Grid */}
+            <div className="overflow-y-auto p-4">
+              <div className="grid grid-cols-2 gap-3">
+                {(recipe.ingredients as Ingredient[]).map((ing, i) => {
+                  const scaled = scaleAmount(ing.amount)
+                  const hasAmount = ing.amount && !isNaN(parseFloat(ing.amount))
+                  return (
+                    <div key={i} className="bg-stone-800 rounded-2xl px-4 py-3.5 flex flex-col gap-1.5 active:bg-stone-700 transition-colors">
+                      {hasAmount ? (
+                        <div className="flex items-baseline gap-1.5">
+                          <span className="text-orange-400 font-bold text-2xl tabular-nums leading-none">{scaled}</span>
+                          {ing.unit && <span className="text-orange-300/70 text-sm font-medium leading-none">{ing.unit}</span>}
+                        </div>
+                      ) : (
+                        <span className="text-orange-300/70 text-sm font-medium leading-none">{scaled || '—'}</span>
+                      )}
+                      <span className="text-stone-300 text-sm leading-snug">{ing.name}</span>
+                    </div>
+                  )
+                })}
+              </div>
             </div>
           </div>
         </div>
