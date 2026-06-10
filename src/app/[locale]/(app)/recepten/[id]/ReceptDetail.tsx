@@ -44,6 +44,11 @@ export default function ReceptDetail({ recipe }: { recipe: Recipe }) {
   const [pantryItems, setPantryItems] = useState<{ name: string; quantity: number }[]>([])
   const notesTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Sla laatste geopende recept op voor scroll-terugkeer
+  useEffect(() => {
+    localStorage.setItem('lastRecipeId', recipe.id)
+  }, [recipe.id])
+
   // Laad pantry items voor "in huis" check
   useEffect(() => {
     const supabase = createClient()
@@ -226,6 +231,16 @@ export default function ReceptDetail({ recipe }: { recipe: Recipe }) {
               className="text-stone-400 text-lg"
               aria-label="Bewerken"
             >✏️</button>
+            <button
+              onClick={async () => {
+                if (!confirm('Weet je zeker dat je dit recept wilt verwijderen?')) return
+                const supabase = createClient()
+                await supabase.from('recipes').delete().eq('id', recipe.id)
+                router.back()
+              }}
+              className="text-stone-400 text-lg"
+              aria-label="Verwijderen"
+            >🗑️</button>
             <button onClick={() => router.back()} className="text-stone-400 text-lg font-medium" aria-label="Sluiten">✕</button>
           </div>
         </div>
@@ -626,7 +641,9 @@ function KookstandView({
             return false
           }
 
-          const relevant = (recipe.ingredients as Ingredient[]).filter(ing => mentionedInStep(ing.name))
+          const relevant = activeStep === 0
+            ? (recipe.ingredients as Ingredient[])
+            : (recipe.ingredients as Ingredient[]).filter(ing => mentionedInStep(ing.name))
           if (relevant.length === 0) return null
           return (
             <div className="flex flex-wrap gap-2 mt-5">

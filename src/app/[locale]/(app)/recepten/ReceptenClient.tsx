@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { useParams } from 'next/navigation'
@@ -40,6 +40,17 @@ export default function ReceptenClient({ recipes }: { recipes: Recipe[] }) {
   const [shareMode, setShareMode] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [sharing, setSharing] = useState(false)
+
+  const listRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const lastId = localStorage.getItem('lastRecipeId')
+    if (!lastId) return
+    localStorage.removeItem('lastRecipeId')
+    requestAnimationFrame(() => {
+      const el = document.getElementById(`recipe-${lastId}`)
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+  }, [])
 
   async function toggleFavorite(id: string, e: React.MouseEvent) {
     e.preventDefault()
@@ -345,7 +356,7 @@ function RecipeCard({
   )
 
   if (shareMode) {
-    return <div className={cardClass} onClick={() => onToggleSelect?.(recipe.id)}>{inner}</div>
+    return <div id={`recipe-${recipe.id}`} className={cardClass} onClick={() => onToggleSelect?.(recipe.id)}>{inner}</div>
   }
-  return <Link href={`/${locale}/recepten/${recipe.id}`} className={cardClass}>{inner}</Link>
+  return <Link id={`recipe-${recipe.id}`} href={`/${locale}/recepten/${recipe.id}`} className={cardClass}>{inner}</Link>
 }
