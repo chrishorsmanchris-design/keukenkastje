@@ -5,40 +5,13 @@ import { createClient } from '@/lib/supabase/client'
 import type { ShoppingItem } from '@/lib/types'
 import { predictExpiry } from '@/lib/expiry'
 import { useToast } from '@/components/Toast'
+import { SHOPPING_CATEGORY_CONFIG, categorizeShopping, categorizePantry, shoppingCategoryFor } from '@/lib/categorize'
 
-// Supermarkt looproute
-const CATEGORY_CONFIG: { name: string; icon: string }[] = [
-  { name: 'Groente & fruit',         icon: '🥦' },
-  { name: 'Brood & bakkerij',        icon: '🍞' },
-  { name: 'Vlees & vis',             icon: '🥩' },
-  { name: 'Zuivel & eieren',         icon: '🥛' },
-  { name: 'Pasta & rijst',           icon: '🍝' },
-  { name: 'Blikken & potten',        icon: '🥫' },
-  { name: 'Sauzen & kruiden',        icon: '🫙' },
-  { name: 'Dranken',                 icon: '🥤' },
-  { name: 'Diepvries',               icon: '❄️' },
-  { name: 'Persoonlijke verzorging', icon: '🧴' },
-  { name: 'Overig',                  icon: '📦' },
-]
-const CATEGORY_ICON = Object.fromEntries(CATEGORY_CONFIG.map(c => [c.name, c.icon]))
-const CATEGORIES = CATEGORY_CONFIG.map(c => c.name)
-
-function categorize(name: string): string {
-  const n = name.toLowerCase()
-  // Gebruik stam-matching zodat zowel enkelvoud als meervoud matcht
-  // (tomaat/tomaten, banaan/bananen, peer/peren, ui/uien etc.)
-  if (/tomat|paprika|\bui\b|uien|knoflook|wortel|sla\b|spinazie|broccoli|courgett|aubergine|avocado|citroen|limoen|appel|peren\b|peer\b|banan|aardappel|venkel|komkommer|prei|champignon|paddenstoel|aardbei|framboos|bosbes|mango|ananas|druif|kers\b|kersen|pruim|abrikoos|perzik|gember|wortel|mais|erwtjes|boontjes|asperge|kool|spruitjes/.test(n)) return 'Groente & fruit'
-  if (/kip|rund|vark|gehakt|zalm|vis\b|garnaal|tonijn|spek|chorizo|bacon|ham\b|worst/.test(n)) return 'Vlees & vis'
-  if (/melk|kaas|boter|room\b|yoghurt|kwark|ei\b|eieren|mozzarella|parmezaan|ricotta|creme fraiche|feta|halloumi/.test(n)) return 'Zuivel & eieren'
-  if (/brood|baguette|ciabatta|pita|tortilla|wrap|bagel|stokbrood|croissant/.test(n)) return 'Brood & bakkerij'
-  if (/pasta|spaghetti|penne|tagliatelle|rijst|couscous|quinoa|noodle|mie\b|bloem|havermout|lasagne/.test(n)) return 'Pasta & rijst'
-  if (/blik|pot\b|kikkererwt|linzen|boon\b|bonen|tomatenblok|kokosmelk|olijven/.test(n)) return 'Blikken & potten'
-  if (/olie|azijn|sojasaus|tahini|pesto|mosterd|ketchup|zout|peper\b|komijn|kurkuma|oregano|basilicum|tijm|rozemarijn|kaneel|honing|suiker|sambal|ketjap/.test(n)) return 'Sauzen & kruiden'
-  if (/water|sap\b|wijn|bier|cola|thee|koffie|limonade/.test(n)) return 'Dranken'
-  if (/diepvries|bevroren/.test(n)) return 'Diepvries'
-  if (/shampoo|zeep|tandpasta|wasmiddel|schoonmaak|toilet|tissues/.test(n)) return 'Persoonlijke verzorging'
-  return 'Overig'
-}
+// Supermarkt looproute — gedeelde indeling, zie src/lib/categorize.ts
+const CATEGORY_ICON = Object.fromEntries(SHOPPING_CATEGORY_CONFIG.map(c => [c.name, c.icon]))
+const CATEGORIES = SHOPPING_CATEGORY_CONFIG.map(c => c.name)
+/** Deze categorieën gaan niet automatisch naar de voorraadkast bij afvinken. */
+const NON_PANTRY = new Set(['Persoonlijke verzorging', 'Huishouden', 'Overig'])
 
 const CACHE_KEY = 'boodschappen_cache'
 
@@ -178,7 +151,7 @@ export default function BoodschappenClient({ initialItems, householdId, role = '
       return
     }
 
-    const category = categorize(name)
+    const category = categorizeShopping(name)
     const tempId = `temp-${Date.now()}`
     const optimistic: ShoppingItem = {
       id: tempId, name, category, household_id: householdId,
@@ -253,13 +226,16 @@ export default function BoodschappenClient({ initialItems, householdId, role = '
         checked,
         checked_at: checked ? new Date().toISOString() : null,
       }).eq('id', item.id)
-      if (checked && item.category !== 'Persoonlijke verzorging' && item.category !== 'Overig') {
+      // Alleen eetbare boodschappen horen in de voorraadkast.
+      const cat = shoppingCategoryFor(item)
+      if (checked && !NON_PANTRY.has(cat)) {
         const { data: { user: currentUser } } = await supabase.auth.getUser()
         const { data: profile } = await supabase.from('profiles').select('household_id').eq('id', currentUser!.id).single()
         await supabase.from('pantry_items').insert({
           name: item.name,
           quantity: item.quantity ?? 1,
           unit: item.unit ?? 'stuks',
+          category: categorizePantry(item.name),
           expires_at: predictExpiry(item.name),
           household_id: profile?.household_id,
         })
@@ -315,7 +291,7 @@ export default function BoodschappenClient({ initialItems, householdId, role = '
   const grouped: Record<string, ShoppingItem[]> = {}
   for (const item of unchecked) {
     // Herclassificeer items die (door oude regex) als 'Overig' zijn opgeslagen
-    const cat = (!item.category || item.category === 'Overig') ? categorize(item.name) : item.category
+    const cat = shoppingCategoryFor(item)
     if (!grouped[cat]) grouped[cat] = []
     grouped[cat].push(item)
   }

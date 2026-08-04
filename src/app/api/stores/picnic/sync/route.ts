@@ -3,21 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { picnicGetLatestDelivery, picnicLogin } from '@/lib/picnic'
 import { predictExpiry } from '@/lib/expiry'
 import { NextResponse } from 'next/server'
-
-function categorize(name: string): string {
-  const n = name.toLowerCase()
-  if (/melk|yoghurt|kwark|kaas|boter|room|ei\b|eieren|mozzarella|feta/.test(n)) return 'Zuivel & eieren'
-  if (/kip|rund|gehakt|vark|spek|bacon|ham|worst|zalm|vis\b|garnaal|tonijn/.test(n)) return 'Vlees & vis'
-  if (/appel|peer|banaan|tomaat|paprika|\bui\b|wortel|sla\b|spinazie|broccoli|courgette|avocado|citroen|aardappel|komkommer|prei|champignon/.test(n)) return 'Groente & fruit'
-  if (/brood|baguette|pita|tortilla|wrap/.test(n)) return 'Brood'
-  if (/pasta|spaghetti|rijst|couscous|quinoa|mie\b|bloem|havermout/.test(n)) return 'Droog & graan'
-  if (/blik|pot\b|kikkererwt|linzen|boon\b|kokosmelk|tomatenpuree/.test(n)) return 'Blikken & potten'
-  if (/olie|azijn|sojasaus|pesto|mosterd|ketchup|mayonaise|saus\b/.test(n)) return 'Sauzen & oliën'
-  if (/zout|peper\b|komijn|kurkuma|oregano|basilicum|tijm|kaneel|honing|suiker/.test(n)) return 'Kruiden & specerijen'
-  if (/water|sap\b|wijn|bier|cola|thee|koffie/.test(n)) return 'Dranken'
-  if (/diepvries|bevroren/.test(n)) return 'Diepvries'
-  return 'Overig'
-}
+import { categorizePantry } from '@/lib/categorize'
 
 export async function POST(request: Request) {
   const supabase = await createClient()
@@ -58,7 +44,7 @@ export async function POST(request: Request) {
     name: item.name,
     quantity: item.quantity,
     unit: item.unit,
-    category: categorize(item.name),
+    category: categorizePantry(item.name),
     expires_at: predictExpiry(item.name),
   }))
 

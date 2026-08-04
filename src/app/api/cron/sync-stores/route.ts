@@ -3,33 +3,29 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { picnicGetLatestDelivery } from '@/lib/picnic'
 import { ahGetRecentReceipts, ahRefresh } from '@/lib/ah'
 import { predictExpiry } from '@/lib/expiry'
+import { categorizePantry } from '@/lib/categorize'
 
 // Vercel cron: vercel.json → {"crons": [{"path": "/api/cron/sync-stores", "schedule": "0 6 * * *"}]}
 // Of handmatig aanroepen: POST /api/cron/sync-stores
 
-function categorize(name: string): string {
-  const n = name.toLowerCase()
-  if (/melk|yoghurt|kwark|kaas|boter|room|ei\b|eieren|mozzarella|feta/.test(n)) return 'Zuivel & eieren'
-  if (/kip|rund|gehakt|vark|spek|bacon|ham|worst|zalm|vis\b|garnaal|tonijn/.test(n)) return 'Vlees & vis'
-  if (/appel|peer|banaan|tomaat|paprika|\bui\b|wortel|sla\b|spinazie|broccoli|courgette|avocado|citroen|aardappel|komkommer|prei|champignon/.test(n)) return 'Groente & fruit'
-  if (/brood|baguette|pita|tortilla|wrap/.test(n)) return 'Brood & bakkerij'
-  if (/pasta|spaghetti|rijst|couscous|quinoa|mie\b|bloem/.test(n)) return 'Pasta & rijst'
-  if (/blik|pot\b|kikkererwt|linzen|boon\b|kokosmelk|tomatenpuree/.test(n)) return 'Blikken & potten'
-  if (/olie|azijn|sojasaus|pesto|mosterd|ketchup|zout|peper\b|komijn|kurkuma|oregano|basilicum|tijm|kaneel|honing|suiker/.test(n)) return 'Sauzen & kruiden'
-  if (/water|sap\b|wijn|bier|cola|thee|koffie/.test(n)) return 'Dranken'
-  return 'Overig'
+/** Alleen Vercel cron (of iemand met CRON_SECRET) mag deze sync starten. */
+function isAuthorized(req: NextRequest): boolean {
+  if (process.env.NODE_ENV !== 'production') return true
+  if (!process.env.CRON_SECRET) return false
+  return req.headers.get('authorization') === `Bearer ${process.env.CRON_SECRET}`
 }
 
 export async function GET(req: NextRequest) {
-  // Vercel cron authenticatie
-  const authHeader = req.headers.get('authorization')
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}` && process.env.NODE_ENV === 'production') {
+  if (!isAuthorized(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
   return runSync()
 }
 
 export async function POST(req: NextRequest) {
+  if (!isAuthorized(req)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
   return runSync()
 }
 
@@ -51,7 +47,7 @@ async function runSync() {
           name: item.name,
           quantity: item.quantity,
           unit: item.unit || 'stuks',
-          category: categorize(item.name),
+          category: categorizePantry(item.name),
           expires_at: predictExpiry(item.name),
         }))
 
@@ -95,7 +91,7 @@ async function runSync() {
             name: item.name,
             quantity: item.quantity,
             unit: item.unit,
-            category: categorize(item.name),
+            category: categorizePantry(item.name),
             expires_at: predictExpiry(item.name),
           }))
         )
