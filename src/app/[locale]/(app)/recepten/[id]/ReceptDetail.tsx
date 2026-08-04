@@ -1,24 +1,13 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { compressImage } from '@/lib/compress-image'
 import { useToast } from '@/components/Toast'
+import { isInPantry as matchesPantry } from '@/lib/pantry-match'
+import { categorizeShopping } from '@/lib/categorize'
 import type { Recipe, Ingredient } from '@/lib/types'
-
-function categorize(name: string): string {
-  const n = name.toLowerCase()
-  if (/tomaat|paprika|ui|knoflook|wortel|sla|spinazie|broccoli|courgette|aubergine|avocado|citroen|limoen|appel|peer|banaan|aardappel|zoete aardappel|venkel/.test(n)) return 'Groente & fruit'
-  if (/kip|rund|vark|gehakt|zalm|vis|garnaal|tonijn|spek|chorizo/.test(n)) return 'Vlees & vis'
-  if (/melk|kaas|boter|room|yoghurt|kwark|ei|mozzarella|parmezaan|ricotta|creme fraiche/.test(n)) return 'Zuivel & eieren'
-  if (/brood|baguette|ciabatta|pita|tortilla|wrap/.test(n)) return 'Brood & bakkerij'
-  if (/pasta|spaghetti|penne|tagliatelle|rijst|couscous|quinoa|noodle/.test(n)) return 'Pasta & rijst'
-  if (/blik|pot|kikkererwt|linzen|boon|tomatenblok|kokosmelk/.test(n)) return 'Blikken & potten'
-  if (/olie|azijn|sojasaus|tahini|harissa|pesto|mosterd|ketchup|zout|peper|komijn|kurkuma|oregano|basilicum|tijm|rozemarijn|paprikapoeder|kaneel|honing|suiker|bloem/.test(n)) return 'Sauzen & kruiden'
-  if (/water|sap|wijn|bier|cola|thee|koffie/.test(n)) return 'Dranken'
-  return 'Overig'
-}
 
 const CUISINE_FLAGS: Record<string, string> = {
   'Italiaans': '🇮🇹', 'Midden-Oosters': '🫙', 'Aziatisch': '🇯🇵',
@@ -28,8 +17,11 @@ const CUISINE_FLAGS: Record<string, string> = {
 export default function ReceptDetail({ recipe }: { recipe: Recipe }) {
   const router = useRouter()
   const toast = useToast()
+  const searchParams = useSearchParams()
   const [servings, setServings] = useState(recipe.servings)
-  const [kookstand, setKookstand] = useState(false)
+  // ?kookstand=1 opent direct de kookstand, zodat "Start koken" op het
+  // dashboard in één tik werkt.
+  const [kookstand, setKookstand] = useState(searchParams.get('kookstand') === '1')
   const [activeStep, setActiveStep] = useState(0)
   const [adding, setAdding] = useState(false)
   const [added, setAdded] = useState(false)
@@ -109,11 +101,7 @@ export default function ReceptDetail({ recipe }: { recipe: Recipe }) {
   }
 
   function isInPantry(ingredientName: string): boolean {
-    const needle = ingredientName.toLowerCase().trim()
-    return pantryItems.some(p => {
-      const hay = p.name.toLowerCase().trim()
-      return hay.includes(needle) || needle.includes(hay)
-    })
+    return matchesPantry(ingredientName, pantryItems)
   }
 
   async function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -163,7 +151,7 @@ export default function ReceptDetail({ recipe }: { recipe: Recipe }) {
         household_id: profile?.household_id,
         is_manual: false,
         checked: false,
-        category: categorize(ing.name),
+        category: categorizeShopping(ing.name),
       }))
     )
     setAdding(false)

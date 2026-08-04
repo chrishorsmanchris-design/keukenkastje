@@ -5,6 +5,8 @@ import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 import Image from 'next/image'
 import { createClient } from '@/lib/supabase/client'
+import { findInPantry } from '@/lib/pantry-match'
+import { categorizeShopping } from '@/lib/categorize'
 
 const CUISINE_FLAGS: Record<string, string> = {
   'Italiaans': '🇮🇹', 'Midden-Oosters': '🫙', 'Aziatisch': '🇯🇵',
@@ -28,7 +30,17 @@ function getShortDate(dateStr: string): string {
 }
 
 type Recipe = { id: string; title: string; image_url?: string; cuisine?: string; servings: number }
-type MenuItem = { id: string; date: string; servings: number; recipe?: Recipe; cook_name?: string; notes?: string }
+type MealType = 'dinner' | 'lunch'
+type MenuItem = { id: string; date: string; meal_type?: MealType; servings: number; recipe?: Recipe; cook_name?: string; notes?: string }
+
+type ShoppingDraft = { name: string; quantity: number; unit: string; recipe_id: string }
+type PantryHit = { item: ShoppingDraft; pantryName: string; pantryQty?: number; pantryUnit?: string }
+type ReviewState = { need: ShoppingDraft[]; have: PantryHit[]; householdId: string }
+
+/** 1,5 in plaats van 1.5000000000000002 */
+function prettyQty(n: number): string {
+  return Number.isInteger(n) ? String(n) : n.toFixed(1).replace('.', ',')
+}
 
 export default function WeekmenuClient({
   menuItems, recipes, dates, householdId, role = 'member', members = [],
@@ -44,14 +56,19 @@ export default function WeekmenuClient({
   const router = useRouter()
   const { locale } = useParams()
   const [menu, setMenu] = useState<MenuItem[]>(menuItems)
+  const [mealType, setMealType] = useState<MealType>('dinner')
   const [picker, setPicker] = useState<string | null>(null)
   const [moving, setMoving] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [generating, setGenerating] = useState(false)
+  const [generateError, setGenerateError] = useState('')
+  const [review, setReview] = useState<ReviewState | null>(null)
+  const [alsoBuy, setAlsoBuy] = useState<Set<string>>(new Set())
+  const [copying, setCopying] = useState(false)
   const [, startTransition] = useTransition()
   const [selectedDates, setSelectedDates] = useState<Set<string>>(
-    () => new Set(menuItems.filter(m => m.recipe).map(m => m.date))
+    () => new Set(menuItems.filter(m => m.recipe && (m.meal_type ?? 'dinner') === 'dinner').map(m => m.date))
   )
   const [hid, setHid] = useState(householdId)
 
@@ -80,7 +97,7 @@ export default function WeekmenuClient({
     async function reloadMenu() {
       const { data } = await supabase
         .from('week_menu').select('*, recipe:recipes(*)')
-        .in('date', dates).eq('meal_type', 'dinner').eq('household_id', hid)
+        .in('date', dates).in('meal_type', ['dinner', 'lunch']).eq('household_id', hid)
       if (data) setMenu(data as MenuItem[])
     }
 
@@ -96,7 +113,18 @@ export default function WeekmenuClient({
     return () => { supabase.removeChannel(channel) }
   }, [hid])
 
-  const menuByDate = Object.fromEntries(menu.map(m => [m.date, m]))
+  // Alleen de maaltijd die nu getoond wordt.
+  const mealsShown = menu.filter(m => (m.meal_type ?? 'dinner') === mealType)
+  const menuByDate = Object.fromEntries(mealsShown.map(m => [m.date, m]))
+
+  /** Wisselt tussen avondeten en lunch; de selectie volgt die maaltijd. */
+  function switchMealType(next: MealType) {
+    setMealType(next)
+    setMoving(null)
+    setSelectedDates(
+      new Set(menu.filter(m => m.recipe && (m.meal_type ?? 'dinner') === next).map(m => m.date))
+    )
+  }
 
   function toggleSelected(date: string) {
     setSelectedDates(prev => {
@@ -113,12 +141,12 @@ export default function WeekmenuClient({
 
     if (existing) {
       await supabase.from('week_menu').update({ recipe_id: recipe.id, servings: recipe.servings }).eq('id', existing.id)
-      setMenu(m => m.map(item => item.date === date ? { ...item, recipe, servings: recipe.servings } : item))
+      setMenu(m => m.map(item => item.id === existing.id ? { ...item, recipe, servings: recipe.servings } : item))
     } else {
       const { data: { user } } = await supabase.auth.getUser()
       const { data: profile } = await supabase.from('profiles').select('household_id').eq('id', user!.id).single()
       const { data } = await supabase.from('week_menu').insert({
-        date, meal_type: 'dinner', recipe_id: recipe.id,
+        date, meal_type: mealType, recipe_id: recipe.id,
         servings: recipe.servings, household_id: profile?.household_id,
       }).select('*, recipe:recipes(*)').single()
       if (data) setMenu(m => [...m, data])
@@ -128,12 +156,72 @@ export default function WeekmenuClient({
     setSearch('')
   }
 
+  /**
+   * Neemt het menu van 7 dagen geleden over. Vult alleen lege dagen, zodat je
+   * nooit per ongeluk iets overschrijft wat je al gepland had.
+   */
+  async function copyPreviousWeek() {
+    setCopying(true)
+    setGenerateError('')
+    try {
+      const supabase = createClient()
+
+      const sourceDates = dates.map(d => {
+        const prev = new Date(d + 'T12:00:00')
+        prev.setDate(prev.getDate() - 7)
+        return prev.toISOString().split('T')[0]
+      })
+
+      const { data: previous, error } = await supabase
+        .from('week_menu')
+        .select('date, servings, recipe:recipes(*)')
+        .in('date', sourceDates)
+        .eq('meal_type', mealType)
+        .not('recipe_id', 'is', null)
+      if (error) throw error
+
+      const byDate = Object.fromEntries((previous ?? []).map(p => [p.date, p]))
+      const toInsert = dates
+        .map((target, i) => ({ target, source: byDate[sourceDates[i]] }))
+        .filter(({ target, source }) => source?.recipe && !menuByDate[target]?.recipe)
+
+      if (!toInsert.length) {
+        setGenerateError('Vorige week stond niets gepland dat hier nog past.')
+        setCopying(false)
+        return
+      }
+
+      const { data: { user } } = await supabase.auth.getUser()
+      const { data: profile } = await supabase.from('profiles').select('household_id').eq('id', user!.id).single()
+
+      const { data: inserted, error: insError } = await supabase
+        .from('week_menu')
+        .insert(toInsert.map(({ target, source }) => ({
+          date: target,
+          meal_type: mealType,
+          recipe_id: (source!.recipe as unknown as Recipe).id,
+          servings: source!.servings,
+          household_id: profile?.household_id,
+        })))
+        .select('*, recipe:recipes(*)')
+      if (insError) throw insError
+
+      if (inserted?.length) {
+        setMenu(m => [...m, ...inserted])
+        setSelectedDates(prev => new Set([...prev, ...inserted.map((i: { date: string }) => i.date)]))
+      }
+    } catch (e) {
+      setGenerateError(e instanceof Error ? e.message : 'Vorige week overnemen lukte niet')
+    }
+    setCopying(false)
+  }
+
   async function removeDay(date: string) {
     const supabase = createClient()
     const item = menuByDate[date]
     if (!item) return
     await supabase.from('week_menu').delete().eq('id', item.id)
-    setMenu(m => m.filter(x => x.date !== date))
+    setMenu(m => m.filter(x => x.id !== item.id))
     setSelectedDates(prev => { const next = new Set(prev); next.delete(date); return next })
   }
 
@@ -142,7 +230,7 @@ export default function WeekmenuClient({
     const item = menuByDate[date]
     if (!item) return
     await supabase.from('week_menu').update({ servings }).eq('id', item.id)
-    setMenu(m => m.map(x => x.date === date ? { ...x, servings } : x))
+    setMenu(m => m.map(x => x.id === item.id ? { ...x, servings } : x))
   }
 
   async function updateCookName(date: string, cookName: string) {
@@ -150,7 +238,7 @@ export default function WeekmenuClient({
     const item = menuByDate[date]
     if (!item) return
     await supabase.from('week_menu').update({ cook_name: cookName }).eq('id', item.id)
-    setMenu(m => m.map(x => x.date === date ? { ...x, cook_name: cookName } : x))
+    setMenu(m => m.map(x => x.id === item.id ? { ...x, cook_name: cookName } : x))
   }
 
   async function updateNotes(date: string, notes: string) {
@@ -158,7 +246,7 @@ export default function WeekmenuClient({
     const item = menuByDate[date]
     if (!item) return
     await supabase.from('week_menu').update({ notes }).eq('id', item.id)
-    setMenu(m => m.map(x => x.date === date ? { ...x, notes } : x))
+    setMenu(m => m.map(x => x.id === item.id ? { ...x, notes } : x))
   }
 
   async function moveToDate(fromDate: string, toDate: string) {
@@ -178,8 +266,8 @@ export default function WeekmenuClient({
         supabase.from('week_menu').update({ recipe_id: fromItem.recipe?.id ?? null }).eq('id', toItem.id),
       ])
       setMenu(m => m.map(x => {
-        if (x.date === fromDate) return { ...x, recipe: toItem.recipe }
-        if (x.date === toDate) return { ...x, recipe: fromItem.recipe }
+        if (x.id === fromItem.id) return { ...x, recipe: toItem.recipe }
+        if (x.id === toItem.id) return { ...x, recipe: fromItem.recipe }
         return x
       }))
       // Mirror selection state in the swap
@@ -192,7 +280,7 @@ export default function WeekmenuClient({
     } else {
       // Move to empty day
       await supabase.from('week_menu').update({ date: toDate }).eq('id', fromItem.id)
-      setMenu(m => m.map(x => x.date === fromDate ? { ...x, date: toDate } : x))
+        setMenu(m => m.map(x => x.id === fromItem.id ? { ...x, date: toDate } : x))
       setSelectedDates(prev => {
         const next = new Set(prev)
         if (next.has(fromDate)) { next.delete(fromDate); next.add(toDate) }
@@ -202,44 +290,104 @@ export default function WeekmenuClient({
     setMoving(null)
   }
 
+  /** Stelt de lijst samen en splitst af wat er al in de pantry ligt. */
   async function generateShoppingList() {
     setGenerating(true)
-    const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    const { data: profile } = await supabase.from('profiles').select('household_id').eq('id', user!.id).single()
-    const householdId = profile?.household_id
+    try {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      const { data: profile } = await supabase.from('profiles').select('household_id').eq('id', user!.id).single()
+      const householdId = profile?.household_id
+      if (!householdId) throw new Error('Geen huishouden gevonden')
 
-    const planned = menu.filter(m => m.recipe && selectedDates.has(m.date))
-    const recipeIds = planned.map(m => m.recipe!.id)
-    const { data: fullRecipes } = await supabase.from('recipes').select('id, ingredients, servings').in('id', recipeIds)
+      const planned = menu.filter(m => m.recipe && selectedDates.has(m.date))
+      const recipeIds = planned.map(m => m.recipe!.id)
+      const [{ data: fullRecipes, error: recipeError }, { data: pantry }] = await Promise.all([
+        supabase.from('recipes').select('id, ingredients, servings').in('id', recipeIds),
+        supabase.from('pantry_items').select('name, quantity, unit').eq('household_id', householdId),
+      ])
+      if (recipeError) throw recipeError
 
-    const recipeMap = Object.fromEntries((fullRecipes ?? []).map(r => [r.id, r]))
+      const recipeMap = Object.fromEntries((fullRecipes ?? []).map(r => [r.id, r]))
 
-    const items: { name: string; quantity: number; unit: string; recipe_id: string }[] = []
-    for (const m of planned) {
-      const full = recipeMap[m.recipe!.id]
-      if (!full) continue
-      const ratio = m.servings / full.servings
-      for (const ing of full.ingredients as { name: string; amount: string; unit: string }[]) {
-        const qty = parseFloat(ing.amount) * ratio
-        items.push({ name: ing.name, quantity: isNaN(qty) ? 1 : qty, unit: ing.unit, recipe_id: m.recipe!.id })
+      const items: ShoppingDraft[] = []
+      for (const m of planned) {
+        const full = recipeMap[m.recipe!.id]
+        if (!full) continue
+        const ratio = m.servings / full.servings
+        for (const ing of full.ingredients as { name: string; amount: string; unit: string }[]) {
+          const qty = parseFloat(ing.amount) * ratio
+          items.push({ name: ing.name, quantity: isNaN(qty) ? 1 : qty, unit: ing.unit, recipe_id: m.recipe!.id })
+        }
       }
+
+      const merged: Record<string, ShoppingDraft> = {}
+      for (const item of items) {
+        const key = item.name.toLowerCase()
+        if (merged[key]) merged[key].quantity += item.quantity
+        else merged[key] = { ...item }
+      }
+      const allItems = Object.values(merged)
+
+      // Wat ligt er al in huis? Niet stilzwijgend weglaten — de gebruiker
+      // krijgt het te zien en kan het alsnog op de lijst zetten.
+      const pantryItems = pantry ?? []
+      const have: PantryHit[] = []
+      const need: ShoppingDraft[] = []
+      for (const item of allItems) {
+        const hit = findInPantry(item.name, pantryItems)
+        if (hit) have.push({ item, pantryName: hit.name, pantryQty: hit.quantity, pantryUnit: hit.unit })
+        else need.push(item)
+      }
+
+      if (have.length > 0) {
+        setReview({ need, have, householdId })
+        setGenerating(false)
+        return
+      }
+
+      await writeShoppingList(need, householdId)
+    } catch (e) {
+      setGenerating(false)
+      setGenerateError(e instanceof Error ? e.message : 'Boodschappenlijst maken lukte niet')
     }
+  }
 
-    const merged: Record<string, typeof items[0]> = {}
-    for (const item of items) {
-      const key = item.name.toLowerCase()
-      if (merged[key]) merged[key].quantity += item.quantity
-      else merged[key] = { ...item }
+  /** Schrijft de definitieve lijst weg en gaat door naar de boodschappenlijst. */
+  async function writeShoppingList(itemsToAdd: ShoppingDraft[], householdId: string) {
+    const supabase = createClient()
+    const { error: delError } = await supabase
+      .from('shopping_items').delete().eq('household_id', householdId).eq('is_manual', false)
+    if (delError) throw delError
+
+    if (itemsToAdd.length) {
+      const { error: insError } = await supabase.from('shopping_items').insert(
+        itemsToAdd.map(item => ({
+          ...item,
+          household_id: householdId,
+          is_manual: false,
+          checked: false,
+          category: categorizeShopping(item.name),
+        }))
+      )
+      if (insError) throw insError
     }
-
-    await supabase.from('shopping_items').delete().eq('household_id', householdId).eq('is_manual', false)
-    await supabase.from('shopping_items').insert(
-      Object.values(merged).map(item => ({ ...item, household_id: householdId, is_manual: false, checked: false }))
-    )
-
     setGenerating(false)
+    setReview(null)
     startTransition(() => router.push(`/${locale}/boodschappenlijst`))
+  }
+
+  /** Bevestigt het overzicht: alles wat aangevinkt staat gaat alsnog mee. */
+  async function confirmReview() {
+    if (!review) return
+    setGenerating(true)
+    try {
+      const extra = review.have.filter(h => alsoBuy.has(h.item.name)).map(h => h.item)
+      await writeShoppingList([...review.need, ...extra], review.householdId)
+    } catch (e) {
+      setGenerating(false)
+      setGenerateError(e instanceof Error ? e.message : 'Opslaan lukte niet')
+    }
   }
 
   const filteredRecipes = recipes.filter(r => r.title.toLowerCase().includes(search.toLowerCase()))
@@ -266,7 +414,43 @@ export default function WeekmenuClient({
       {moving && (
         <div className="bg-orange-50 border border-orange-200 rounded-2xl px-4 py-2.5 text-sm text-orange-700 flex items-center justify-between">
           <span>Tik op een dag om het recept daarheen te verplaatsen</span>
-          <button onClick={() => setMoving(null)} className="text-orange-400 ml-2">✕</button>
+          <button onClick={() => setMoving(null)} className="text-orange-400 ml-2" aria-label="Verplaatsen annuleren">✕</button>
+        </div>
+      )}
+
+      {/* Avondeten of lunch */}
+      <div className="flex gap-1 bg-stone-100 rounded-full p-1">
+        {([
+          { value: 'dinner' as const, label: '🍽️ Avondeten' },
+          { value: 'lunch' as const, label: '🥪 Lunch' },
+        ]).map(opt => (
+          <button
+            key={opt.value}
+            onClick={() => switchMealType(opt.value)}
+            aria-pressed={mealType === opt.value}
+            className={`flex-1 text-sm font-medium py-2 rounded-full transition-colors ${
+              mealType === opt.value ? 'bg-white text-stone-800 shadow-sm' : 'text-stone-500'
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      {canWrite && dates.some(d => !menuByDate[d]?.recipe) && (
+        <button
+          onClick={copyPreviousWeek}
+          disabled={copying}
+          className="w-full py-2.5 rounded-2xl border border-stone-200 text-sm font-medium text-stone-600 hover:bg-stone-50 transition-colors disabled:opacity-40"
+        >
+          {copying ? 'Bezig...' : '↻ Vorige week overnemen'}
+        </button>
+      )}
+
+      {generateError && (
+        <div className="bg-red-50 border border-red-200 rounded-2xl px-4 py-2.5 text-sm text-red-700 flex items-center justify-between">
+          <span>{generateError}</span>
+          <button onClick={() => setGenerateError('')} className="text-red-400 ml-2" aria-label="Melding sluiten">✕</button>
         </div>
       )}
 
@@ -323,13 +507,15 @@ export default function WeekmenuClient({
                     <button
                       onClick={e => { e.stopPropagation(); setMoving(date) }}
                       title="Verplaatsen"
-                      className="text-stone-300 hover:text-orange-400 text-sm px-1"
+                      aria-label="Maaltijd verplaatsen naar andere dag"
+                      className="text-stone-300 hover:text-orange-400 text-base px-2 py-2 -my-2"
                     >
                       ⇄
                     </button>
                     <button
                       onClick={e => { e.stopPropagation(); removeDay(date) }}
-                      className="text-stone-300 hover:text-red-400 text-sm"
+                      aria-label="Maaltijd van deze dag verwijderen"
+                      className="text-stone-300 hover:text-red-400 text-base px-2 py-2 -my-2"
                     >
                       ✕
                     </button>
@@ -352,9 +538,10 @@ export default function WeekmenuClient({
                       )}
                       {members.length > 1 && !moving && canWrite && (
                         <div className="flex items-center gap-1 mt-0.5" onClick={e => e.stopPropagation()}>
-                          <span className="text-xs text-stone-400">👤</span>
+                          <span className="text-xs text-stone-400" aria-hidden="true">👤</span>
                           <select
                             value={item.cook_name ?? ''}
+                            aria-label="Wie kookt er deze dag"
                             onChange={e => updateCookName(date, e.target.value)}
                             className="text-xs text-stone-500 bg-transparent border-none outline-none cursor-pointer max-w-[90px] truncate"
                           >
@@ -410,13 +597,83 @@ export default function WeekmenuClient({
         })}
       </div>
 
+      {/* Overzicht: dit heb je al in huis */}
+      {review && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-end" onClick={() => setReview(null)}>
+          <div className="bg-white w-full rounded-t-3xl p-4 max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-1">
+              <h2 className="font-semibold">Dit heb je al in huis</h2>
+              <button onClick={() => setReview(null)} className="text-stone-400 p-2 -m-2" aria-label="Sluiten">✕</button>
+            </div>
+            <p className="text-stone-500 text-sm mb-3">
+              {review.have.length} van {review.have.length + review.need.length} ingrediënten liggen al in je
+              pantry. Die slaan we over — vink aan wat je tóch wilt kopen.
+            </p>
+
+            <div className="overflow-y-auto -mx-1 px-1 space-y-1.5">
+              {review.have.map(hit => {
+                const checked = alsoBuy.has(hit.item.name)
+                return (
+                  <label
+                    key={hit.item.name}
+                    className="flex items-center gap-3 p-2.5 rounded-xl bg-stone-50 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => setAlsoBuy(prev => {
+                        const next = new Set(prev)
+                        if (next.has(hit.item.name)) next.delete(hit.item.name)
+                        else next.add(hit.item.name)
+                        return next
+                      })}
+                      className="w-5 h-5 accent-orange-500 flex-shrink-0"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className={`text-sm font-medium truncate ${checked ? '' : 'text-stone-500'}`}>
+                        {hit.item.name}
+                        <span className="text-stone-400 font-normal">
+                          {' '}· {prettyQty(hit.item.quantity)} {hit.item.unit}
+                        </span>
+                      </p>
+                      <p className="text-xs text-stone-400 truncate">
+                        🧺 in huis: {hit.pantryName}
+                        {hit.pantryQty ? ` (${prettyQty(hit.pantryQty)} ${hit.pantryUnit ?? ''})` : ''}
+                      </p>
+                    </div>
+                  </label>
+                )
+              })}
+            </div>
+
+            <div className="pt-3 mt-1 border-t border-stone-100 flex gap-2">
+              <button
+                onClick={() => setAlsoBuy(new Set(review.have.map(h => h.item.name)))}
+                className="px-4 py-3 rounded-2xl border border-stone-200 text-sm font-medium hover:bg-stone-50 transition-colors"
+              >
+                Alles tóch kopen
+              </button>
+              <button
+                onClick={confirmReview}
+                disabled={generating}
+                className="flex-1 py-3 rounded-2xl bg-orange-500 text-white text-sm font-medium hover:bg-orange-600 transition-colors disabled:opacity-40"
+              >
+                {generating
+                  ? 'Bezig...'
+                  : `${review.need.length + alsoBuy.size} op de lijst zetten`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Recipe picker modal */}
       {picker && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-end" onClick={() => setPicker(null)}>
           <div className="bg-white w-full rounded-t-3xl p-4 max-h-[70vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <h2 className="font-semibold">Kies een recept</h2>
-              <button onClick={() => setPicker(null)} className="text-stone-400">✕</button>
+              <button onClick={() => setPicker(null)} className="text-stone-400 p-2 -m-2" aria-label="Receptkiezer sluiten">✕</button>
             </div>
             <input
               type="search"

@@ -21,9 +21,10 @@ export default async function WeekmenuPage() {
   const [{ data: menuItems }, { data: recipes }, { data: members }] = await Promise.all([
     supabase
       .from('week_menu')
+      // Lunch én diner ophalen; de client toont er één tegelijk.
       .select('*, recipe:recipes(*)')
       .in('date', dates)
-      .eq('meal_type', 'dinner')
+      .in('meal_type', ['dinner', 'lunch'])
       .eq('household_id', profile?.household_id ?? ''),
     supabase
       .from('recipes')

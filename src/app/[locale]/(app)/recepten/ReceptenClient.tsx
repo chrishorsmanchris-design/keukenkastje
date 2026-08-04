@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { useParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import type { Recipe } from '@/lib/types'
+import { isInPantry } from '@/lib/pantry-match'
 
 const CUISINES = ['Italiaans', 'Midden-Oosters', 'Aziatisch', 'Nederlands', 'Mexicaans', 'Frans', 'Amerikaans']
 const TYPES = ['Vis', 'Vlees', 'Kip', 'Vegetarisch', 'Pasta', 'Rijst', 'Soep', 'Salade']
@@ -23,14 +24,37 @@ const TIME_FILTERS = [
 
 type SortOption = 'az' | 'nieuwst' | 'snelst'
 
-export default function ReceptenClient({ recipes }: { recipes: Recipe[] }) {
+export default function ReceptenClient({
+  recipes,
+  pantry = [],
+}: {
+  recipes: Recipe[]
+  pantry?: { name: string; quantity: number }[]
+}) {
   const { locale } = useParams()
   const [search, setSearch] = useState('')
   const [filterCuisine, setFilterCuisine] = useState('')
   const [filterType, setFilterType] = useState('')
   const [filterTime, setFilterTime] = useState<number | null>(null)
   const [onlyFavorites, setOnlyFavorites] = useState(false)
+  const [canCookOnly, setCanCookOnly] = useState(false)
   const [sortBy, setSortBy] = useState<SortOption>('az')
+
+  /**
+   * Hoeveel ingrediënten mist dit recept? Berekend uit de pantry, zodat
+   * "wat kan ik nú koken?" beantwoord kan worden.
+   */
+  const missingByRecipe = useMemo(() => {
+    const map = new Map<string, number>()
+    if (!pantry.length) return map
+    for (const r of recipes) {
+      const ingredients = Array.isArray(r.ingredients) ? r.ingredients : []
+      if (!ingredients.length) continue
+      const missing = ingredients.filter(ing => !isInPantry(ing.name, pantry)).length
+      map.set(r.id, missing)
+    }
+    return map
+  }, [recipes, pantry])
 
   // Local favorites state — optimistic updates
   const [favorites, setFavorites] = useState<Set<string>>(
@@ -40,6 +64,21 @@ export default function ReceptenClient({ recipes }: { recipes: Recipe[] }) {
   const [shareMode, setShareMode] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [sharing, setSharing] = useState(false)
+
+  // Inplannen vanaf de receptkaart
+  const [planFor, setPlanFor] = useState<Recipe | null>(null)
+  const [planning, setPlanning] = useState<string | null>(null)
+  const [planned, setPlanned] = useState<string | null>(null)
+  const [planError, setPlanError] = useState('')
+
+  const nextDays = useMemo(
+    () => Array.from({ length: 7 }, (_, i) => {
+      const d = new Date()
+      d.setDate(d.getDate() + i)
+      return d
+    }),
+    []
+  )
 
   const listRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -65,13 +104,14 @@ export default function ReceptenClient({ recipes }: { recipes: Recipe[] }) {
     await supabase.from('recipes').update({ is_favorite: next }).eq('id', id)
   }
 
-  const activeFilterCount = [filterCuisine, filterType, filterTime, onlyFavorites ? 'fav' : ''].filter(Boolean).length
+  const activeFilterCount = [filterCuisine, filterType, filterTime, onlyFavorites ? 'fav' : '', canCookOnly ? 'pantry' : ''].filter(Boolean).length
 
   function clearAll() {
     setFilterCuisine('')
     setFilterType('')
     setFilterTime(null)
     setOnlyFavorites(false)
+    setCanCookOnly(false)
     setSearch('')
   }
 
@@ -98,6 +138,40 @@ export default function ReceptenClient({ recipes }: { recipes: Recipe[] }) {
     setSelected(new Set())
   }
 
+  /** Plant een recept in op een dag, zonder de receptpagina te openen. */
+  async function planOnDay(date: string) {
+    if (!planFor) return
+    setPlanning(date)
+    try {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      const { data: profile } = await supabase
+        .from('profiles').select('household_id').eq('id', user!.id).single()
+
+      const { data: existing } = await supabase
+        .from('week_menu').select('id')
+        .eq('date', date).eq('meal_type', 'dinner')
+        .eq('household_id', profile!.household_id)
+        .maybeSingle()
+
+      const { error } = existing
+        ? await supabase.from('week_menu')
+            .update({ recipe_id: planFor.id, servings: planFor.servings })
+            .eq('id', existing.id)
+        : await supabase.from('week_menu').insert({
+            date, meal_type: 'dinner', recipe_id: planFor.id,
+            servings: planFor.servings, household_id: profile!.household_id,
+          })
+      if (error) throw error
+
+      setPlanned(date)
+      setTimeout(() => { setPlanFor(null); setPlanned(null) }, 900)
+    } catch {
+      setPlanError('Inplannen lukte niet — probeer het opnieuw')
+    }
+    setPlanning(null)
+  }
+
   function toggleSelect(id: string) {
     setSelected(prev => {
       const next = new Set(prev)
@@ -109,6 +183,12 @@ export default function ReceptenClient({ recipes }: { recipes: Recipe[] }) {
   const filtered = recipes
     .filter(r => {
       if (onlyFavorites && !favorites.has(r.id)) return false
+      // "Kan ik koken": hooguit 2 ingrediënten missen, anders is het geen
+      // realistisch voorstel voor vanavond.
+      if (canCookOnly) {
+        const missing = missingByRecipe.get(r.id)
+        if (missing === undefined || missing > 2) return false
+      }
       const matchSearch = r.title.toLowerCase().includes(search.toLowerCase())
       const matchCuisine = !filterCuisine || r.cuisine === filterCuisine
       const matchType = !filterType || r.ingredient_type === filterType
@@ -119,6 +199,10 @@ export default function ReceptenClient({ recipes }: { recipes: Recipe[] }) {
     .sort((a, b) => {
       if (sortBy === 'az') return a.title.localeCompare(b.title, 'nl')
       if (sortBy === 'nieuwst') return b.created_at.localeCompare(a.created_at)
+      if (canCookOnly) {
+        const diff = (missingByRecipe.get(a.id) ?? 99) - (missingByRecipe.get(b.id) ?? 99)
+        if (diff !== 0) return diff
+      }
       if (sortBy === 'snelst') {
         const ta = (a.prep_time_minutes ?? 0) + (a.cook_time_minutes ?? 0)
         const tb = (b.prep_time_minutes ?? 0) + (b.cook_time_minutes ?? 0)
@@ -205,12 +289,25 @@ export default function ReceptenClient({ recipes }: { recipes: Recipe[] }) {
         {/* Favorites toggle */}
         <button
           onClick={() => setOnlyFavorites(v => !v)}
+          aria-pressed={onlyFavorites}
           className={`flex-shrink-0 text-xs px-3 py-1.5 rounded-full border transition-colors ${
             onlyFavorites ? 'bg-red-500 text-white border-red-500' : 'bg-white text-stone-600 border-stone-200'
           }`}
         >
           {onlyFavorites ? '❤️ Favorieten' : '🤍 Favorieten'}
         </button>
+        {/* Wat kan ik nu koken? */}
+        {pantry.length > 0 && (
+          <button
+            onClick={() => setCanCookOnly(v => !v)}
+            aria-pressed={canCookOnly}
+            className={`flex-shrink-0 text-xs px-3 py-1.5 rounded-full border transition-colors ${
+              canCookOnly ? 'bg-green-600 text-white border-green-600' : 'bg-white text-stone-600 border-stone-200'
+            }`}
+          >
+            🧺 Kan ik koken
+          </button>
+        )}
       </div>
 
       {/* Type filter */}
@@ -295,10 +392,57 @@ export default function ReceptenClient({ recipes }: { recipes: Recipe[] }) {
                 shareMode={shareMode}
                 selected={selected.has(recipe.id)}
                 onToggleSelect={toggleSelect}
+                missing={canCookOnly ? missingByRecipe.get(recipe.id) : undefined}
+                onPlan={(r, e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setPlanError('')
+                  setPlanFor(r)
+                }}
               />
             ))}
           </div>
         </>
+      )}
+
+      {/* Inplannen: kies een dag */}
+      {planFor && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-end" onClick={() => setPlanFor(null)}>
+          <div className="bg-white w-full rounded-t-3xl p-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-1">
+              <h2 className="font-semibold">Wanneer eten we dit?</h2>
+              <button onClick={() => setPlanFor(null)} className="text-stone-400 p-2 -m-2" aria-label="Sluiten">✕</button>
+            </div>
+            <p className="text-stone-500 text-sm mb-3 truncate">{planFor.title}</p>
+
+            {planError && (
+              <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2 mb-3">{planError}</p>
+            )}
+
+            <div className="space-y-1.5 pb-2">
+              {nextDays.map((d, i) => {
+                const iso = d.toISOString().split('T')[0]
+                const label = i === 0 ? 'Vandaag' : i === 1 ? 'Morgen'
+                  : d.toLocaleDateString('nl-NL', { weekday: 'long' })
+                return (
+                  <button
+                    key={iso}
+                    onClick={() => planOnDay(iso)}
+                    disabled={planning !== null}
+                    className="w-full flex items-center justify-between px-4 py-3 rounded-2xl bg-stone-50 hover:bg-stone-100 transition-colors text-left disabled:opacity-50"
+                  >
+                    <span className="text-sm font-medium capitalize">{label}</span>
+                    <span className="text-xs text-stone-400">
+                      {planned === iso ? '✓ gepland'
+                        : planning === iso ? 'Bezig...'
+                        : d.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' })}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
@@ -306,6 +450,7 @@ export default function ReceptenClient({ recipes }: { recipes: Recipe[] }) {
 
 function RecipeCard({
   recipe, locale, isFavorite, onToggleFavorite, shareMode, selected, onToggleSelect,
+  missing, onPlan,
 }: {
   recipe: Recipe
   locale: string
@@ -314,6 +459,9 @@ function RecipeCard({
   shareMode?: boolean
   selected?: boolean
   onToggleSelect?: (id: string) => void
+  /** Aantal ontbrekende ingrediënten, of undefined als dat niet bekend is. */
+  missing?: number
+  onPlan?: (recipe: Recipe, e: React.MouseEvent) => void
 }) {
   const totalTime = (recipe.prep_time_minutes ?? 0) + (recipe.cook_time_minutes ?? 0)
   const cardClass = `bg-white rounded-2xl overflow-hidden border transition-all relative ${
@@ -338,12 +486,35 @@ function RecipeCard({
           {selected && <span className="text-white text-xs font-bold">✓</span>}
         </div>
       ) : (
-        <button
-          onClick={e => onToggleFavorite(recipe.id, e)}
-          className="absolute top-2 right-2 w-7 h-7 bg-white/80 backdrop-blur-sm rounded-full flex items-center justify-center shadow-sm hover:scale-110 transition-transform"
+        <div className="absolute top-2 right-2 flex flex-col gap-1.5">
+          <button
+            onClick={e => onToggleFavorite(recipe.id, e)}
+            aria-label={isFavorite ? `${recipe.title} uit favorieten` : `${recipe.title} als favoriet`}
+            className="w-9 h-9 bg-white/85 backdrop-blur-sm rounded-full flex items-center justify-center shadow-sm hover:scale-110 transition-transform"
+          >
+            <span className="text-base leading-none">{isFavorite ? '❤️' : '🤍'}</span>
+          </button>
+          {onPlan && (
+            <button
+              onClick={e => onPlan(recipe, e)}
+              aria-label={`${recipe.title} inplannen`}
+              title="Inplannen"
+              className="w-9 h-9 bg-white/85 backdrop-blur-sm rounded-full flex items-center justify-center shadow-sm hover:scale-110 transition-transform"
+            >
+              <span className="text-base leading-none">📅</span>
+            </button>
+          )}
+        </div>
+      )}
+      {/* Hoeveel ingrediënten mis je nog? */}
+      {missing !== undefined && (
+        <span
+          className={`absolute top-2 left-2 text-[10px] font-semibold px-2 py-1 rounded-full ${
+            missing === 0 ? 'bg-green-600 text-white' : 'bg-white/90 text-stone-600 backdrop-blur-sm'
+          }`}
         >
-          <span className="text-base leading-none">{isFavorite ? '❤️' : '🤍'}</span>
-        </button>
+          {missing === 0 ? '✓ compleet' : `mist ${missing}`}
+        </span>
       )}
       <div className="p-3">
         <p className="font-medium text-sm leading-tight line-clamp-2 pr-1">{recipe.title}</p>

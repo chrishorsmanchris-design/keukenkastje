@@ -137,12 +137,26 @@ export default function NieuwReceptPage() {
   }
 
   async function handleSave() {
+    setSaveError('')
+    // Lege regels eruit: die ontstaan door de standaard-lege velden in het formulier.
+    const ingredients = form.ingredients.filter(i => i.name.trim())
+    const steps = form.steps
+      .filter(s => s.text.trim())
+      .map((s, i) => ({ ...s, order: i + 1 }))
+
+    if (!form.title.trim()) { setSaveError('Geef het recept een titel.'); return }
+    if (ingredients.length === 0) { setSaveError('Voeg minstens één ingrediënt toe.'); return }
+    if (steps.length === 0) { setSaveError('Voeg minstens één bereidingsstap toe.'); return }
+
     setSaving(true)
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
     const { data: profile } = await supabase.from('profiles').select('household_id').eq('id', user!.id).single()
     const { data, error } = await supabase.from('recipes').insert({
       ...form,
+      title: form.title.trim(),
+      ingredients,
+      steps,
       household_id: profile?.household_id,
     }).select().single()
     if (error) { setSaveError(error.message); setSaving(false); return }

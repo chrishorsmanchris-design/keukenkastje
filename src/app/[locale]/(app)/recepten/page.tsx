@@ -11,11 +11,17 @@ export default async function ReceptenPage() {
     .eq('id', user!.id)
     .single()
 
-  const { data: recipes } = await supabase
-    .from('recipes')
-    .select('*')
-    .eq('household_id', profile?.household_id ?? '')
-    .order('title')
+  const [{ data: recipes }, { data: pantry }] = await Promise.all([
+    supabase
+      .from('recipes')
+      .select('*')
+      .eq('household_id', profile?.household_id ?? '')
+      .order('title'),
+    supabase
+      .from('pantry_items')
+      .select('name, quantity')
+      .eq('household_id', profile?.household_id ?? ''),
+  ])
 
-  return <ReceptenClient recipes={recipes ?? []} />
+  return <ReceptenClient recipes={recipes ?? []} pantry={pantry ?? []} />
 }

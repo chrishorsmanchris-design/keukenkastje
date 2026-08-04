@@ -4,36 +4,10 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { predictExpiry } from '@/lib/expiry'
 import { useToast } from '@/components/Toast'
+import { PANTRY_CATEGORY_CONFIG, categorizePantry } from '@/lib/categorize'
 import type { PantryItem } from '@/lib/types'
 
-function categorize(name: string): string {
-  const n = name.toLowerCase()
-  if (/melk|yoghurt|kwark|kaas|boter|room|slagroom|mozzarella|parmezaan|ricotta|creme fraiche|crème fraîche|feta|halloumi|brie|camembert|gouda|edam|ei\b|eieren/.test(n)) return 'Zuivel & eieren'
-  if (/\bkip\b|kipfilet|kipdi|kippen|rund|biefstuk|gehakt|vark|spek|bacon|ham|worst|salami|chorizo|zalm|vis\b|kabeljauw|tilapia|garnaal|tonijn|makreel|haring|forel|inktvis|mosselen|oesters/.test(n)) return 'Vlees & vis'
-  if (/appel|peer|banaan|aardbei|framboos|bosbes|mango|ananas|meloen|druif|kers|pruim|abrikoos|perzik|vijg|tomaat|paprika|\bui\b|uien|knoflook|wortel|sla\b|sla,|spinazie|broccoli|courgette|aubergine|avocado|citroen|limoen|sinaasappel|grapefruit|aardappel|zoete aardappel|venkel|komkommer|prei|selderij|witlof|radijs|biet|mais|erwtjes|boontjes|asperge|artisjok|kool|spruitjes|paddenstoel|champignon|portobello|courgetti/.test(n)) return 'Groente & fruit'
-  if (/brood|baguette|ciabatta|pita|tortilla|wrap|croissant|bagel|brioche|focaccia|stokbrood|beschuit|crackers|knäckebröd/.test(n)) return 'Brood'
-  if (/pasta|spaghetti|penne|fusilli|rigatoni|tagliatelle|lasagne|gnocchi|rijst|couscous|quinoa|bulgur|noodle|mie\b|meel|bloem|havermout|granola|muesli|cornflakes|polenta|griesmeel/.test(n)) return 'Droog & graan'
-  if (/blik|pot\b|potje|kikkererwt|linzen|kidneyboon|boon\b|bonen|tomatenblok|gezeefde tomaten|tomatenpuree|kokosmelk|ingeblikte|conserven|augurk|kappertjes|olijven/.test(n)) return 'Blikken & potten'
-  if (/olijfolie|zonnebloemolie|kokosolie|sesamolie|\bolie\b|azijn|balsamico|sojasaus|teriyaki|vissaus|worcestershire|tahini|hummus|pesto|mosterd|ketchup|mayonaise|sriracha|sambal|tabasco|hoisin|ketjap|saus\b/.test(n)) return 'Sauzen & oliën'
-  if (/kruiden|specerij|kruid\b|\bzout\b|zeezout|peper\b|peperkorrel|komijn|kurkuma|kerrie|curry|oregano|basilicum|tijm|rozemarijn|paprikapoeder|cayenne|chilipoeder|kaneel|nootmuskaat|kardemom|koriander|korianderzaad|laurier|dille|peterselie|bieslook|munt|salie|dragon|venkelzaad|karwij|anijs|steranijs|kruidnagel|piment|gember|sumak|za'atar|ras el hanout|garam masala|5-kruidenpoeder|gemalen|poeder|gedroogd|italiaanse|provençaal|mixed herbs|bouillon|honing|suiker|vanille|bakpoeder|baking soda|maizena|gelatine/.test(n)) return 'Kruiden & specerijen'
-  if (/water|bronwater|spa|frisdrank|sap\b|sinaasappelsap|appelsap|tomatensap|wijn|rode wijn|witte wijn|bier|cola|fanta|sprite|thee|groene thee|koffie|espresso|cappuccino|chocolademelk|limonade/.test(n)) return 'Dranken'
-  if (/diepvries|bevroren|ingevroren|frozen/.test(n)) return 'Diepvries'
-  return 'Overig'
-}
-
-const PANTRY_CATEGORY_CONFIG: { name: string; icon: string }[] = [
-  { name: 'Zuivel & eieren',      icon: '🥛' },
-  { name: 'Vlees & vis',          icon: '🥩' },
-  { name: 'Groente & fruit',      icon: '🥦' },
-  { name: 'Brood',                icon: '🍞' },
-  { name: 'Droog & graan',        icon: '🍝' },
-  { name: 'Blikken & potten',     icon: '🥫' },
-  { name: 'Sauzen & oliën',       icon: '🫙' },
-  { name: 'Kruiden & specerijen', icon: '🌿' },
-  { name: 'Dranken',              icon: '🥤' },
-  { name: 'Diepvries',            icon: '❄️' },
-  { name: 'Overig',               icon: '📦' },
-]
+const categorize = categorizePantry
 const PANTRY_CATEGORIES = PANTRY_CATEGORY_CONFIG.map(c => c.name)
 const PANTRY_CATEGORY_ICON = Object.fromEntries(PANTRY_CATEGORY_CONFIG.map(c => [c.name, c.icon]))
 
@@ -79,6 +53,12 @@ export default function PantryClient({ initialItems, householdId, role = 'member
   const fileRef = useRef<HTMLInputElement>(null)
   const toast = useToast()
 
+  // Verwijderde items wachten 5 seconden zodat "ongedaan maken" kan.
+  const pendingDeletes = useRef<Map<string, PantryItem>>(new Map())
+  const undoTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  const itemsRef = useRef<PantryItem[]>(items)
+  itemsRef.current = items
+
   const expiringSoon = items.filter(i => { const d = daysUntil(i.expires_at); return d !== null && d <= 3 })
 
   // Zorg altijd voor geldige hid — ook bij gecachede prop
@@ -110,7 +90,9 @@ export default function PantryClient({ initialItems, householdId, role = 'member
       const { data } = await supabase.from('pantry_items').select('*')
         .eq('household_id', hid)
         .order('expires_at', { ascending: true, nullsFirst: false })
-      if (data) setItems(data)
+      // Items die de gebruiker net verwijderde staan nog in de database
+      // (we wachten 5s op "ongedaan maken") — die niet terugzetten.
+      if (data) setItems(data.filter(i => !pendingDeletes.current.has(i.id)))
     }
 
     const channel = supabase
@@ -133,28 +115,75 @@ export default function PantryClient({ initialItems, householdId, role = 'member
     return data?.household_id ?? ''
   }
 
+  /**
+   * Werkt één veld bij met optimistic UI. Lukt opslaan niet, dan draaien we
+   * de wijziging op het scherm terug en zeggen we het — anders lijkt het
+   * bewaard terwijl er niets gebeurd is.
+   */
+  const patchItem = useCallback(async (
+    id: string,
+    patch: Partial<PantryItem>,
+    /** Wat er naar de database gaat, als dat afwijkt (bijv. null i.p.v. undefined). */
+    dbPatch?: Record<string, unknown>,
+  ) => {
+    let previous: PantryItem | undefined
+    setItems(prev => prev.map(i => {
+      if (i.id !== id) return i
+      previous = i
+      return { ...i, ...patch }
+    }))
+
+    const supabase = createClient()
+    const { error } = await supabase.from('pantry_items').update(dbPatch ?? patch).eq('id', id)
+    if (error) {
+      if (previous) {
+        const restore = previous
+        setItems(prev => prev.map(i => (i.id === id ? restore : i)))
+      }
+      toast('Opslaan mislukt — probeer het opnieuw', 'error')
+    }
+  }, [toast])
+
   async function handlePhotoScan(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
     setScanning(true)
-    const formData = new FormData()
-    formData.append('image', file)
-    const res = await fetch('/api/pantry/scan', { method: 'POST', body: formData })
-    const { products } = await res.json()
-    setScanned((products ?? []).map((p: Omit<ScannedProduct, 'selected'>) => ({ ...p, selected: true })))
+    try {
+      const formData = new FormData()
+      formData.append('image', file)
+      const res = await fetch('/api/pantry/scan', { method: 'POST', body: formData })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error ?? `Scannen mislukte (${res.status})`)
+      }
+      const { products } = await res.json()
+      if (!products?.length) {
+        toast('Geen producten herkend op deze foto', 'info')
+      } else {
+        setScanned(products.map((p: Omit<ScannedProduct, 'selected'>) => ({ ...p, selected: true })))
+      }
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Scannen mislukt', 'error')
+    }
     setScanning(false)
+    e.target.value = '' // dezelfde foto opnieuw kunnen kiezen
   }
 
   async function saveScanned() {
     setSaving(true)
-    const supabase = createClient()
-    const householdId = await getHousehold()
-    const toSave = scanned.filter(p => p.selected)
-    const { data } = await supabase.from('pantry_items').insert(
-      toSave.map(p => ({ name: p.name, quantity: p.quantity, unit: p.unit, expires_at: p.expires_at, household_id: householdId }))
-    ).select()
-    if (data) setItems(prev => [...prev, ...data])
-    setScanned([])
+    try {
+      const supabase = createClient()
+      const householdId = await getHousehold()
+      const toSave = scanned.filter(p => p.selected)
+      const { data, error } = await supabase.from('pantry_items').insert(
+        toSave.map(p => ({ name: p.name, quantity: p.quantity, unit: p.unit, expires_at: p.expires_at, household_id: householdId }))
+      ).select()
+      if (error) throw error
+      if (data) setItems(prev => [...prev, ...data])
+      setScanned([])
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Opslaan mislukt', 'error')
+    }
     setSaving(false)
   }
 
@@ -162,63 +191,100 @@ export default function PantryClient({ initialItems, householdId, role = 'member
     e.preventDefault()
     if (!newItem.name.trim()) return
     setSaving(true)
-    const supabase = createClient()
-    const householdId = await getHousehold()
-    const { data } = await supabase.from('pantry_items').insert({
-      ...newItem, expires_at: predictExpiry(newItem.name), household_id: householdId,
-    }).select().single()
-    if (data) setItems(prev => [...prev, data])
-    setNewItem({ name: '', quantity: 1, unit: 'stuks' })
-    setShowAdd(false)
+    try {
+      const supabase = createClient()
+      const householdId = await getHousehold()
+      const { data, error } = await supabase.from('pantry_items').insert({
+        ...newItem, expires_at: predictExpiry(newItem.name), household_id: householdId,
+      }).select().single()
+      if (error) throw error
+      if (data) setItems(prev => [...prev, data])
+      setNewItem({ name: '', quantity: 1, unit: 'stuks' })
+      setShowAdd(false)
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Toevoegen mislukt', 'error')
+    }
     setSaving(false)
   }
 
   async function addItemByName(name: string) {
-    const supabase = createClient()
-    const householdId = await getHousehold()
-    const { data } = await supabase.from('pantry_items').insert({
-      name, quantity: 1, unit: 'stuks',
-      expires_at: predictExpiry(name),
-      household_id: householdId,
-    }).select().single()
-    if (data) setItems(prev => [...prev, data])
-    toast(`${name} toegevoegd aan pantry`, 'success')
+    try {
+      const supabase = createClient()
+      const householdId = await getHousehold()
+      const { data, error } = await supabase.from('pantry_items').insert({
+        name, quantity: 1, unit: 'stuks',
+        expires_at: predictExpiry(name),
+        household_id: householdId,
+      }).select().single()
+      if (error) throw error
+      if (data) setItems(prev => [...prev, data])
+      toast(`${name} toegevoegd aan pantry`, 'success')
+    } catch {
+      toast(`${name} toevoegen mislukt`, 'error')
+    }
   }
 
-  async function removeItem(id: string) {
-    const supabase = createClient()
+  /** Verwijderen met 5 seconden bedenktijd, net als op de boodschappenlijst. */
+  const removeItem = useCallback((id: string) => {
+    const item = itemsRef.current.find(i => i.id === id)
+    if (!item) return
+
     setItems(prev => prev.filter(i => i.id !== id))
-    await supabase.from('pantry_items').delete().eq('id', id)
-  }
+    pendingDeletes.current.set(id, item)
+
+    toast(`${item.name} verwijderd`, 'info', {
+      action: {
+        label: 'Ongedaan maken',
+        onClick: () => {
+          const timer = undoTimers.current.get(id)
+          if (timer) clearTimeout(timer)
+          undoTimers.current.delete(id)
+          const restore = pendingDeletes.current.get(id)
+          if (restore) {
+            pendingDeletes.current.delete(id)
+            setItems(prev => [...prev, restore])
+          }
+        },
+      },
+    })
+
+    const timer = setTimeout(async () => {
+      undoTimers.current.delete(id)
+      const stillPending = pendingDeletes.current.get(id)
+      if (!stillPending) return
+      pendingDeletes.current.delete(id)
+      const supabase = createClient()
+      const { error } = await supabase.from('pantry_items').delete().eq('id', id)
+      if (error) {
+        setItems(prev => [...prev, stillPending])
+        toast('Verwijderen mislukt', 'error')
+      }
+    }, 5000)
+    undoTimers.current.set(id, timer)
+  }, [toast])
 
   const updateQuantity = useCallback(async (id: string, quantity: number) => {
     if (quantity <= 0) {
       removeItem(id)
       return
     }
-    setItems(prev => prev.map(i => i.id === id ? { ...i, quantity } : i))
-    const supabase = createClient()
-    await supabase.from('pantry_items').update({ quantity }).eq('id', id)
-  }, []) // eslint-disable-line
+    await patchItem(id, { quantity })
+  }, [patchItem, removeItem])
 
   const updateExpiry = useCallback(async (id: string, expires_at: string) => {
-    setItems(prev => prev.map(i => i.id === id ? { ...i, expires_at: expires_at || undefined } : i))
-    const supabase = createClient()
-    await supabase.from('pantry_items').update({ expires_at: expires_at || null }).eq('id', id)
-  }, [])
+    // Leeg veld = datum wissen. In de database moet dat expliciet null zijn,
+    // want undefined verdwijnt bij het versturen.
+    await patchItem(id, { expires_at: expires_at || undefined }, { expires_at: expires_at || null })
+  }, [patchItem])
 
   const changeCategory = useCallback(async (id: string, category: string) => {
-    setItems(prev => prev.map(i => i.id === id ? { ...i, category } : i))
-    const supabase = createClient()
-    await supabase.from('pantry_items').update({ category }).eq('id', id)
-  }, [])
+    await patchItem(id, { category })
+  }, [patchItem])
 
   const renameName = useCallback(async (id: string, name: string) => {
     if (!name.trim()) return
-    setItems(prev => prev.map(i => i.id === id ? { ...i, name: name.trim() } : i))
-    const supabase = createClient()
-    await supabase.from('pantry_items').update({ name: name.trim() }).eq('id', id)
-  }, [])
+    await patchItem(id, { name: name.trim() })
+  }, [patchItem])
 
   return (
     <div className="px-4 pt-10 pb-4 space-y-4">
@@ -230,6 +296,7 @@ export default function PantryClient({ initialItems, householdId, role = 'member
               onClick={() => setShowBarcode(true)}
               className="bg-stone-100 text-stone-700 text-sm px-3 py-2 rounded-full hover:bg-stone-200 transition-colors"
               title="Barcode scannen"
+              aria-label="Barcode scannen"
             >
               🔍
             </button>
@@ -238,6 +305,7 @@ export default function PantryClient({ initialItems, householdId, role = 'member
               disabled={scanning}
               className="bg-stone-100 text-stone-700 text-sm px-3 py-2 rounded-full hover:bg-stone-200 transition-colors"
               title="Foto scannen"
+              aria-label="Koelkast fotograferen en scannen"
             >
               {scanning ? '⏳' : '📷'}
             </button>
@@ -484,7 +552,8 @@ function PantryRow({ item, rowClass, label, onRemove, onUpdateQuantity, onChange
         <div className="flex items-center gap-1 bg-white/70 rounded-full px-1.5 py-0.5 border border-stone-200 flex-shrink-0">
           <button
             onClick={() => onUpdateQuantity(item.id, item.quantity - 1)}
-            className="w-5 h-5 flex items-center justify-center text-stone-500 hover:text-red-500 transition-colors text-sm"
+            aria-label={`Minder ${item.name}`}
+            className="w-9 h-9 -my-2 flex items-center justify-center text-stone-500 hover:text-red-500 transition-colors text-base"
           >
             −
           </button>
@@ -493,7 +562,8 @@ function PantryRow({ item, rowClass, label, onRemove, onUpdateQuantity, onChange
           </span>
           <button
             onClick={() => onUpdateQuantity(item.id, item.quantity + 1)}
-            className="w-5 h-5 flex items-center justify-center text-stone-500 hover:text-green-600 transition-colors text-sm"
+            aria-label={`Meer ${item.name}`}
+            className="w-9 h-9 -my-2 flex items-center justify-center text-stone-500 hover:text-green-600 transition-colors text-base"
           >
             +
           </button>
@@ -525,12 +595,21 @@ function PantryRow({ item, rowClass, label, onRemove, onUpdateQuantity, onChange
         )}
         <button
           onClick={() => setShowPicker(p => !p)}
-          className="text-xs text-stone-300 hover:text-stone-500 flex-shrink-0 px-1"
+          className="text-xs text-stone-300 hover:text-stone-500 flex-shrink-0 px-2 py-2 -my-2"
           title="Categorie wijzigen"
+          aria-label={`Categorie van ${item.name} wijzigen`}
         >
           ⋯
         </button>
-        {onRemove && <button onClick={() => onRemove(item.id)} className="text-stone-300 hover:text-red-400 transition-colors flex-shrink-0">✕</button>}
+        {onRemove && (
+          <button
+            onClick={() => onRemove(item.id)}
+            aria-label={`${item.name} verwijderen`}
+            className="text-stone-300 hover:text-red-400 transition-colors flex-shrink-0 px-2 py-2 -my-2 -mr-2"
+          >
+            ✕
+          </button>
+        )}
       </div>
 
       {showPicker && (
@@ -672,7 +751,7 @@ function BarcodeScanner({ onResult, onClose }: {
       {/* Header */}
       <div className="flex items-center justify-between p-4 z-10 bg-black/40">
         <h2 className="text-white font-semibold">Barcode scannen</h2>
-        <button onClick={onClose} className="text-white text-xl w-8 h-8 flex items-center justify-center">✕</button>
+        <button onClick={onClose} aria-label="Scanner sluiten" className="text-white text-xl w-11 h-11 flex items-center justify-center">✕</button>
       </div>
 
       {/* States */}
