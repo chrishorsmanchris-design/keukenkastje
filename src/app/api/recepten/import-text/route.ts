@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
+import { requireUser } from '@/lib/require-user'
 
 const anthropic = new Anthropic()
 
 export async function POST(req: NextRequest) {
+  const denied = await requireUser()
+  if (denied) return denied
+
   const { text } = await req.json()
   if (!text?.trim()) return NextResponse.json({ error: 'Geen tekst opgegeven' }, { status: 400 })
 

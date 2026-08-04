@@ -18,14 +18,30 @@ export default function LoginPage() {
     setError('')
     setLoading(true)
     const supabase = createClient()
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) {
-      setError('E-mailadres of wachtwoord onjuist')
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email, password })
+      if (error) {
+        // Alleen écht verkeerde inloggegevens tonen als zodanig. Andere fouten
+        // (server onbereikbaar, e-mail niet bevestigd, rate limit) apart tonen,
+        // anders lijkt een storing op een vergeten wachtwoord.
+        if (error.code === 'invalid_credentials') {
+          setError('E-mailadres of wachtwoord onjuist')
+        } else if (error.code === 'email_not_confirmed') {
+          setError('Bevestig eerst je e-mailadres via de link in je mailbox.')
+        } else if (error.code === 'over_request_rate_limit') {
+          setError('Te veel pogingen. Wacht even en probeer het opnieuw.')
+        } else {
+          setError(`Inloggen lukt nu niet: ${error.message}`)
+        }
+        setLoading(false)
+        return
+      }
+      router.push(`/${locale}`)
+      router.refresh()
+    } catch {
+      setError('Geen verbinding met de server. Controleer je internet en probeer het opnieuw.')
       setLoading(false)
-      return
     }
-    router.push(`/${locale}`)
-    router.refresh()
   }
 
   return (
@@ -53,7 +69,7 @@ export default function LoginPage() {
           <div className="space-y-1">
             <div className="flex items-center justify-between">
               <label className="text-xs font-medium text-stone-500 uppercase tracking-wide">Wachtwoord</label>
-              <Link href={`/${locale}/wachtwoord-vergeten`} className="text-xs text-orange-500 hover:text-orange-600">
+              <Link href={`/${locale}/wachtwoord-vergeten`} className="text-xs text-orange-500 hover:text-orange-600 py-2 pl-3 -mr-1">
                 Vergeten?
               </Link>
             </div>

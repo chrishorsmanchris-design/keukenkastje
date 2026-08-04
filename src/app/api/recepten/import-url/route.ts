@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@/lib/supabase/server'
+import { requireUser } from '@/lib/require-user'
 
 const anthropic = new Anthropic()
 
@@ -140,6 +141,9 @@ Return ONLY valid JSON:
 }`
 
 export async function POST(req: NextRequest) {
+  const denied = await requireUser()
+  if (denied) return denied
+
   const { url } = await req.json()
   if (!url) return NextResponse.json({ error: 'No URL' }, { status: 400 })
 

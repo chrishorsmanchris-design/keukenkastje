@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { predictExpiry } from '@/lib/expiry'
+import { requireUser } from '@/lib/require-user'
 
 const anthropic = new Anthropic()
 
 export async function POST(req: NextRequest) {
+  const denied = await requireUser()
+  if (denied) return denied
+
   const formData = await req.formData()
   const image = formData.get('image') as File | null
   const name = formData.get('name') as string | null

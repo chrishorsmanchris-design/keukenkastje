@@ -10,14 +10,21 @@ export default function WachtwoordVergetenPage() {
   const [email, setEmail] = useState('')
   const [sent, setSent] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
+    setError('')
     const supabase = createClient()
-    await supabase.auth.resetPasswordForEmail(email, {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/${locale}/wachtwoord-reset`,
     })
+    if (error) {
+      setError(error.message)
+      setLoading(false)
+      return
+    }
     setSent(true)
     setLoading(false)
   }
@@ -49,6 +56,9 @@ export default function WachtwoordVergetenPage() {
                 className="w-full px-4 py-3 rounded-2xl border border-stone-200 bg-white text-sm outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent"
               />
             </div>
+            {error && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-2xl text-sm text-red-700">{error}</div>
+            )}
             <button
               type="submit"
               disabled={loading}

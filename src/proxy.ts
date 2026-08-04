@@ -5,7 +5,16 @@ import { routing } from './i18n/routing'
 
 const intlMiddleware = createIntlMiddleware(routing)
 
+const AUTH_PATHS = ['/login', '/registreren', '/wachtwoord', '/invite', '/join']
+
 export async function proxy(request: NextRequest) {
+  const pathname = request.nextUrl.pathname
+
+  // Publieke pagina's: geen auth-check nodig, scheelt een ronde naar Supabase.
+  if (AUTH_PATHS.some((p) => pathname.includes(p))) {
+    return intlMiddleware(request)
+  }
+
   let supabaseResponse = NextResponse.next({ request })
 
   const supabase = createServerClient(
@@ -25,12 +34,20 @@ export async function proxy(request: NextRequest) {
     }
   )
 
-  const { data: { user } } = await supabase.auth.getUser()
+  // getClaims valideert het JWT lokaal wanneer dat kan, in plaats van elke
+  // request naar de Supabase auth-server te sturen. Als dat onverwacht
+  // mislukt, vallen we terug op getUser zodat niemand buitengesloten raakt.
+  let isLoggedIn = false
+  try {
+    const { data, error } = await supabase.auth.getClaims()
+    if (error) throw error
+    isLoggedIn = Boolean(data?.claims)
+  } catch {
+    const { data: { user } } = await supabase.auth.getUser()
+    isLoggedIn = Boolean(user)
+  }
 
-  const pathname = request.nextUrl.pathname
-  const isAuthPage = pathname.includes('/login') || pathname.includes('/registreren') || pathname.includes('/wachtwoord') || pathname.includes('/invite') || pathname.includes('/join')
-
-  if (!user && !isAuthPage) {
+  if (!isLoggedIn) {
     const url = request.nextUrl.clone()
     url.pathname = '/nl/login'
     return NextResponse.redirect(url)

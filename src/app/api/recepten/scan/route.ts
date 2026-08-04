@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
+import { requireUser } from '@/lib/require-user'
 
 const anthropic = new Anthropic()
 
 export async function POST(req: NextRequest) {
+  const denied = await requireUser()
+  if (denied) return denied
+
   const formData = await req.formData()
 
   // Ondersteun meerdere afbeeldingen (image, image_1, image_2, ...)
