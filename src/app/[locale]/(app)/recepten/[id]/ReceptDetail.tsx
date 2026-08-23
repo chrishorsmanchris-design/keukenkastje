@@ -5,9 +5,18 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { compressImage } from '@/lib/compress-image'
 import { useToast } from '@/components/Toast'
-import { isInPantry as matchesPantry } from '@/lib/pantry-match'
+import { isInPantry as matchesPantry, findInPantry } from '@/lib/pantry-match'
 import { categorizeShopping } from '@/lib/categorize'
 import type { Recipe, Ingredient } from '@/lib/types'
+
+/** Een voorraaditem dat in dit recept gebruikt is. */
+type UsedPantryItem = {
+  id: string
+  name: string
+  quantity?: number
+  unit?: string
+  forIngredient: string
+}
 
 const CUISINE_FLAGS: Record<string, string> = {
   'Italiaans': '🇮🇹', 'Midden-Oosters': '🫙', 'Aziatisch': '🇯🇵',
@@ -406,6 +415,12 @@ function KookstandView({
   const [deducting, setDeducting] = useState(false)
   const toast = useToast()
 
+  /** Voorraaditems die bij dit recept horen; gevuld zodra de kookstand klaar is. */
+  const [usedItems, setUsedItems] = useState<UsedPantryItem[] | null>(null)
+  /** Wat de gebruiker als 'op' heeft aangetikt. */
+  const [finished, setFinished] = useState<Set<string>>(new Set())
+  const [alsoShop, setAlsoShop] = useState(true)
+
   // Houd scherm wakker tijdens kookstand
   useEffect(() => {
     if (!('wakeLock' in navigator)) return
@@ -470,36 +485,71 @@ function KookstandView({
     sendSwMessage({ type: 'CANCEL_TIMER', id })
   }
 
-  async function deductAndExit() {
-    setDeducting(true)
+  /**
+   * Zoekt op welke voorraaditems bij dit recept gebruikt zijn.
+   *
+   * Eerder werd hier blind `hoeveelheid × porties` van de voorraad afgetrokken,
+   * zonder naar eenheden te kijken: "200 grams bloem" haalde dan 200 van "1 pak"
+   * af en gooide het pak weg. Nu vragen we gewoon wat er op is.
+   */
+  async function openCookDone() {
+    setShowCookDone(true)
     try {
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
-      const { data: profile } = await supabase.from('profiles').select('household_id').eq('id', user!.id).single()
+      if (!user) { setUsedItems([]); return }
+      const { data: profile } = await supabase.from('profiles').select('household_id').eq('id', user.id).single()
       const { data: pantry } = await supabase.from('pantry_items')
-        .select('id, name, quantity')
+        .select('id, name, quantity, unit')
         .eq('household_id', profile!.household_id)
 
-      const ratio = servings / recipe.servings
       const ingredients = recipe.ingredients as { name: string; amount: string; unit: string }[]
-
+      const seen = new Set<string>()
+      const used: UsedPantryItem[] = []
       for (const ing of ingredients) {
-        const match = pantry?.find(p =>
-          p.name.toLowerCase().includes(ing.name.toLowerCase()) ||
-          ing.name.toLowerCase().includes(p.name.toLowerCase())
-        )
-        if (!match) continue
-        const amt = parseFloat(ing.amount) * ratio
-        if (isNaN(amt) || amt <= 0) continue
-        const newQty = match.quantity - amt
-        if (newQty <= 0.01) {
-          await supabase.from('pantry_items').delete().eq('id', match.id)
-        } else {
-          await supabase.from('pantry_items').update({ quantity: Math.round(newQty * 10) / 10 }).eq('id', match.id)
-        }
+        const match = findInPantry(ing.name, pantry ?? [])
+        if (!match || seen.has(match.id)) continue
+        seen.add(match.id)
+        used.push({ id: match.id, name: match.name, quantity: match.quantity, unit: match.unit, forIngredient: ing.name })
       }
-      toast('🧺 Pantry bijgewerkt')
-    } catch { /* silently ignore */ }
+      setUsedItems(used)
+    } catch {
+      setUsedItems([])
+    }
+  }
+
+  /** Verwerkt de keuzes: alleen wat als 'op' is aangetikt verdwijnt uit de voorraad. */
+  async function applyCookDone() {
+    setDeducting(true)
+    try {
+      const supabase = createClient()
+      const gone = (usedItems ?? []).filter(i => finished.has(i.id))
+      if (gone.length) {
+        const { error } = await supabase.from('pantry_items').delete().in('id', gone.map(i => i.id))
+        if (error) throw error
+
+        if (alsoShop) {
+          const { data: { user } } = await supabase.auth.getUser()
+          const { data: profile } = await supabase.from('profiles').select('household_id').eq('id', user!.id).single()
+          await supabase.from('shopping_items').insert(gone.map(i => ({
+            name: i.name,
+            household_id: profile?.household_id,
+            is_manual: true,
+            checked: false,
+            category: categorizeShopping(i.name),
+          })))
+        }
+        toast(
+          alsoShop
+            ? `🧺 ${gone.length} ${gone.length === 1 ? 'product' : 'producten'} op — op de boodschappenlijst gezet`
+            : `🧺 ${gone.length} ${gone.length === 1 ? 'product' : 'producten'} uit je voorraad gehaald`,
+        )
+      }
+    } catch (e) {
+      toast(e instanceof Error ? `Bijwerken mislukt: ${e.message}` : 'Bijwerken mislukt', 'error')
+      setDeducting(false)
+      return
+    }
     setDeducting(false)
     onExit()
   }
@@ -714,7 +764,7 @@ function KookstandView({
           </button>
         )}
         <button
-          onClick={() => isLast ? setShowCookDone(true) : setActiveStep(activeStep + 1)}
+          onClick={() => isLast ? openCookDone() : setActiveStep(activeStep + 1)}
           className="flex-1 py-4 bg-orange-500 rounded-2xl font-medium"
         >
           {isLast ? '✓ Klaar' : 'Volgende →'}
@@ -780,22 +830,85 @@ function KookstandView({
 
       {showCookDone && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-end">
-          <div className="bg-stone-800 w-full rounded-t-3xl p-6 space-y-4">
-            <h2 className="font-semibold text-white text-lg">Goed gekookt! 🎉</h2>
-            <p className="text-stone-400 text-sm">Wil je de gebruikte ingrediënten van je pantry aftrekken?</p>
-            <button
-              onClick={deductAndExit}
-              disabled={deducting}
-              className="w-full py-3.5 bg-orange-500 text-white font-medium rounded-2xl disabled:opacity-50"
-            >
-              {deducting ? 'Bezig...' : '🧺 Ja, pantry bijwerken'}
-            </button>
-            <button
-              onClick={onExit}
-              className="w-full py-3 text-stone-400 text-sm"
-            >
-              Overslaan
-            </button>
+          <div className="bg-stone-800 w-full rounded-t-3xl max-h-[80vh] flex flex-col">
+            <div className="px-6 pt-6 pb-3">
+              <h2 className="font-semibold text-white text-lg">Goed gekookt! 🎉</h2>
+              <p className="text-stone-400 text-sm mt-1">
+                {usedItems === null ? 'Even je voorraad ophalen…'
+                  : usedItems.length === 0 ? 'Geen van deze ingrediënten staat in je voorraadkast.'
+                  : 'Tik aan wat op is. De rest laten we staan.'}
+              </p>
+            </div>
+
+            {usedItems !== null && usedItems.length > 0 && (
+              <div className="flex-1 overflow-y-auto px-6 space-y-2">
+                {usedItems.map(item => {
+                  const isOp = finished.has(item.id)
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => setFinished(prev => {
+                        const next = new Set(prev)
+                        if (next.has(item.id)) next.delete(item.id); else next.add(item.id)
+                        return next
+                      })}
+                      aria-pressed={isOp}
+                      className={`w-full flex items-center gap-3 p-3 rounded-2xl border text-left transition-colors ${
+                        isOp ? 'bg-orange-500/15 border-orange-500' : 'bg-stone-900 border-stone-700'
+                      }`}
+                    >
+                      <span
+                        className={`w-6 h-6 rounded-full flex items-center justify-center text-xs flex-shrink-0 border-2 ${
+                          isOp ? 'bg-orange-500 border-orange-500 text-white' : 'border-stone-600 text-transparent'
+                        }`}
+                      >
+                        ✓
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-white text-sm font-medium truncate">{item.name}</span>
+                        <span className="block text-xs text-stone-500 truncate">
+                          {item.quantity ?? 1} {item.unit ?? 'stuks'} in voorraad
+                        </span>
+                      </span>
+                      <span className={`text-xs flex-shrink-0 ${isOp ? 'text-orange-400' : 'text-stone-500'}`}>
+                        {isOp ? 'op' : 'nog over'}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
+            <div className="px-6 pt-4 pb-6 space-y-3">
+              {usedItems !== null && finished.size > 0 && (
+                <button
+                  onClick={() => setAlsoShop(v => !v)}
+                  aria-pressed={alsoShop}
+                  className="flex items-center gap-2 text-sm text-stone-300"
+                >
+                  <span
+                    className={`w-5 h-5 rounded flex items-center justify-center text-xs border-2 ${
+                      alsoShop ? 'bg-orange-500 border-orange-500 text-white' : 'border-stone-600 text-transparent'
+                    }`}
+                  >
+                    ✓
+                  </span>
+                  Zet wat op is op de boodschappenlijst
+                </button>
+              )}
+              <button
+                onClick={applyCookDone}
+                disabled={deducting || usedItems === null}
+                className="w-full py-3.5 bg-orange-500 text-white font-medium rounded-2xl disabled:opacity-50"
+              >
+                {deducting ? 'Bezig…'
+                  : finished.size > 0 ? `${finished.size} ${finished.size === 1 ? 'product' : 'producten'} afstrepen`
+                  : 'Klaar'}
+              </button>
+              <button onClick={onExit} className="w-full py-3 text-stone-400 text-sm">
+                Overslaan
+              </button>
+            </div>
           </div>
         </div>
       )}

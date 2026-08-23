@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, useEffect } from 'react'
+import { useState, useTransition, useEffect, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 import Image from 'next/image'
@@ -66,6 +66,10 @@ export default function WeekmenuClient({
   const [review, setReview] = useState<ReviewState | null>(null)
   const [alsoBuy, setAlsoBuy] = useState<Set<string>>(new Set())
   const [copying, setCopying] = useState(false)
+  /** id → tijdstip waarop een lokale wijziging niet meer beschermd hoeft te worden. */
+  const localWrites = useRef<Map<string, number>>(new Map())
+  const holdLocal = (id: string) => { localWrites.current.set(id, Date.now() + 4000) }
+  const releaseLocal = (id: string) => { localWrites.current.delete(id) }
   const [, startTransition] = useTransition()
   const [selectedDates, setSelectedDates] = useState<Set<string>>(
     () => new Set(menuItems.filter(m => m.recipe && (m.meal_type ?? 'dinner') === 'dinner').map(m => m.date))
@@ -89,7 +93,6 @@ export default function WeekmenuClient({
   useEffect(() => {
     if (!hid) return
     const supabase = createClient()
-    const today = new Date().toISOString().split('T')[0]
     const dates = Array.from({ length: 7 }, (_, i) => {
       const d = new Date(); d.setDate(d.getDate() + i); return d.toISOString().split('T')[0]
     })
@@ -98,7 +101,15 @@ export default function WeekmenuClient({
       const { data } = await supabase
         .from('week_menu').select('*, recipe:recipes(*)')
         .in('date', dates).in('meal_type', ['dinner', 'lunch']).eq('household_id', hid)
-      if (data) setMenu(data as MenuItem[])
+      if (!data) return
+      // Wijzigingen die hier net zijn gedaan maar nog niet bevestigd zijn,
+      // mogen niet overschreven worden door deze verse serverdata.
+      setMenu(prev => (data as MenuItem[]).map(row => {
+        const until = localWrites.current.get(row.id)
+        if (!until) return row
+        if (until < Date.now()) { localWrites.current.delete(row.id); return row }
+        return prev.find(x => x.id === row.id) ?? row
+      }))
     }
 
     const channel = supabase
@@ -225,28 +236,42 @@ export default function WeekmenuClient({
     setSelectedDates(prev => { const next = new Set(prev); next.delete(date); return next })
   }
 
-  async function updateServings(date: string, servings: number) {
-    const supabase = createClient()
+  /**
+   * Past één menu-item aan: eerst in beeld, dan in de database, en bij een
+   * mislukking netjes terug.
+   *
+   * Deze schrijfacties gaven eerder geen enkel signaal als ze faalden. De
+   * realtime-reload haalde daarna de oude waarde weer op, waardoor een keuze
+   * als "wie kookt" zonder uitleg terugsprong naar de beginstand.
+   */
+  async function patchMenuItem(date: string, patch: Partial<MenuItem>) {
     const item = menuByDate[date]
     if (!item) return
-    await supabase.from('week_menu').update({ servings }).eq('id', item.id)
-    setMenu(m => m.map(x => x.id === item.id ? { ...x, servings } : x))
+    const previous = item
+    setMenu(m => m.map(x => x.id === item.id ? { ...x, ...patch } : x))
+    holdLocal(item.id)
+    const supabase = createClient()
+    const { data, error } = await supabase
+      .from('week_menu').update(patch).eq('id', item.id).select()
+    releaseLocal(item.id)
+    if (error || !data?.length) {
+      setMenu(m => m.map(x => x.id === item.id ? previous : x))
+      setGenerateError(
+        error ? `Opslaan mislukt: ${error.message}` : 'Opslaan mislukt — je hebt hier misschien geen rechten voor.',
+      )
+    }
+  }
+
+  async function updateServings(date: string, servings: number) {
+    await patchMenuItem(date, { servings })
   }
 
   async function updateCookName(date: string, cookName: string) {
-    const supabase = createClient()
-    const item = menuByDate[date]
-    if (!item) return
-    await supabase.from('week_menu').update({ cook_name: cookName }).eq('id', item.id)
-    setMenu(m => m.map(x => x.id === item.id ? { ...x, cook_name: cookName } : x))
+    await patchMenuItem(date, { cook_name: cookName })
   }
 
   async function updateNotes(date: string, notes: string) {
-    const supabase = createClient()
-    const item = menuByDate[date]
-    if (!item) return
-    await supabase.from('week_menu').update({ notes }).eq('id', item.id)
-    setMenu(m => m.map(x => x.id === item.id ? { ...x, notes } : x))
+    await patchMenuItem(date, { notes })
   }
 
   async function moveToDate(fromDate: string, toDate: string) {

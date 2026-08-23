@@ -205,6 +205,7 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
           { icon: '📖', title: 'Recepten',      subtitle: 'Jouw collectie',       href: 'recepten',         color: 'bg-orange-50' },
           { icon: '🧺', title: 'Pantry',         subtitle: 'Wat heb je in huis?',  href: 'pantry',           color: 'bg-green-50'  },
           { icon: '🛒', title: 'Boodschappen',   subtitle: 'Jouw lijst',           href: 'boodschappenlijst',color: 'bg-yellow-50' },
+          { icon: '📊', title: 'Weekanalyse',    subtitle: 'Eten we gevarieerd?',  href: 'analyse',          color: 'bg-purple-50' },
           { icon: '👨‍👩‍👧', title: 'Huishouden',   subtitle: 'Leden & instellingen', href: 'instellingen',     color: 'bg-stone-100' },
         ].map(card => (
           <Link

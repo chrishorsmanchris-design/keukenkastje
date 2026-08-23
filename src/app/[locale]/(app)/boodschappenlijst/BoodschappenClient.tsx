@@ -31,6 +31,16 @@ export default function BoodschappenClient({ initialItems, householdId, role = '
   const toast = useToast()
   const undoTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
   const pendingDeletes = useRef<Map<string, ShoppingItem>>(new Map())
+  /** id → tijdstip waarop een lokale wijziging niet meer beschermd hoeft te worden. */
+  const recentWrites = useRef<Map<string, number>>(new Map())
+
+  /** Markeert een item als "net lokaal gewijzigd" zodat een reload het niet terugdraait. */
+  const holdLocal = useCallback((id: string) => {
+    recentWrites.current.set(id, Date.now() + 4000)
+  }, [])
+  const releaseLocal = useCallback((id: string) => {
+    recentWrites.current.delete(id)
+  }, [])
 
   // Offline detectie
   useEffect(() => {
@@ -48,19 +58,23 @@ export default function BoodschappenClient({ initialItems, householdId, role = '
     setSpeechSupported(typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in (window as any)))
   }, [])
 
-  // localStorage fallback: alleen gebruiken als server niets gaf én items hebben een naam
+  /**
+   * localStorage-fallback: alleen bij offline zijn.
+   *
+   * Stond hier eerder op "server gaf niets terug", maar een lege lijst is
+   * geldige data — na 'wis afgevinkt' kwamen de verwijderde items daardoor
+   * bij de volgende paginaweergave weer terug.
+   */
   useEffect(() => {
-    if (initialItems.length === 0) {
-      try {
-        const raw = localStorage.getItem(CACHE_KEY)
-        if (raw) {
-          const cached = JSON.parse(raw) as ShoppingItem[]
-          const valid = cached.filter(i => !!i.name)
-          if (valid.length > 0) setItems(valid)
-        }
-      } catch { /* ignore */ }
-    }
-  }, []) // eslint-disable-line
+    if (navigator.onLine) return
+    try {
+      const raw = localStorage.getItem(CACHE_KEY)
+      if (!raw) return
+      const cached = JSON.parse(raw) as ShoppingItem[]
+      const valid = cached.filter(i => !!i.name)
+      if (valid.length > 0) setItems(valid)
+    } catch { /* ignore */ }
+  }, [])
 
   // Als hid pas client-side beschikbaar komt, laad items opnieuw van DB
   useEffect(() => {
@@ -89,19 +103,46 @@ export default function BoodschappenClient({ initialItems, householdId, role = '
     })
   }, [hid])
 
+  /**
+   * Voegt verse serverdata samen met wat hier lokaal net is gewijzigd.
+   *
+   * Zonder dit overschrijft een reload — die ook afgaat door een wijziging van
+   * je partner — een tik die jij net hebt gezet maar die nog niet in de
+   * database staat. Het item sprong dan zichtbaar terug.
+   */
+  const mergeServer = useCallback((rows: ShoppingItem[]) => {
+    setItems(prev => {
+      const now = Date.now()
+      const merged = rows
+        .filter(row => !pendingDeletes.current.has(row.id))
+        .map(row => {
+          const until = recentWrites.current.get(row.id)
+          if (!until) return row
+          if (until < now) { recentWrites.current.delete(row.id); return row }
+          // Nog niet bevestigd: houd de lokale versie vast.
+          return prev.find(i => i.id === row.id) ?? row
+        })
+      // Items die hier net zijn toegevoegd en nog geen server-id hebben.
+      const pendingNew = prev.filter(i => i.id.startsWith('temp-'))
+      return [...merged, ...pendingNew]
+    })
+  }, [])
+
+  const reloadItems = useCallback(async () => {
+    if (!hid) return
+    const supabase = createClient()
+    const { data } = await supabase
+      .from('shopping_items').select('*')
+      .eq('household_id', hid)
+      .order('category', { ascending: true, nullsFirst: false })
+      .order('created_at')
+    if (data) mergeServer(data as ShoppingItem[])
+  }, [hid, mergeServer])
+
   // Realtime sync — bij elke wijziging alle items opnieuw laden voor betrouwbaarheid
   useEffect(() => {
     if (!hid) return
     const supabase = createClient()
-
-    async function reloadItems() {
-      const { data } = await supabase
-        .from('shopping_items').select('*')
-        .eq('household_id', hid)
-        .order('category', { ascending: true, nullsFirst: false })
-        .order('created_at')
-      if (data) setItems(data)
-    }
 
     const channel = supabase
       .channel(`shopping:${hid}`)
@@ -111,31 +152,37 @@ export default function BoodschappenClient({ initialItems, householdId, role = '
         table: 'shopping_items',
         filter: `household_id=eq.${hid}`,
       }, async payload => {
-        if (payload.eventType === 'INSERT') {
-          if (pendingDeletes.current.has(payload.new.id)) return
-          await reloadItems()
-        } else if (payload.eventType === 'UPDATE') {
-          await reloadItems()
-        } else if (payload.eventType === 'DELETE') {
-          if (!pendingDeletes.current.has(payload.old.id)) {
-            await reloadItems()
-          }
-        }
+        if (payload.eventType === 'INSERT' && pendingDeletes.current.has(payload.new.id)) return
+        if (payload.eventType === 'DELETE' && pendingDeletes.current.has(payload.old.id)) return
+        await reloadItems()
       })
-      .subscribe()
+      .subscribe(status => {
+        // Na een herverbinding zijn er wijzigingen gemist; haal alles opnieuw op.
+        if (status === 'SUBSCRIBED') reloadItems()
+      })
     return () => { supabase.removeChannel(channel) }
-  }, [hid])
+  }, [hid, reloadItems])
+
+  /**
+   * Bijwerken zodra het scherm weer actief is. De websocket sneuvelt als de
+   * telefoon in slaap gaat, en dan mis je alles wat je partner intussen deed.
+   */
+  useEffect(() => {
+    const resync = () => { if (document.visibilityState === 'visible' && navigator.onLine) reloadItems() }
+    document.addEventListener('visibilitychange', resync)
+    window.addEventListener('online', resync)
+    window.addEventListener('focus', resync)
+    return () => {
+      document.removeEventListener('visibilitychange', resync)
+      window.removeEventListener('online', resync)
+      window.removeEventListener('focus', resync)
+    }
+  }, [reloadItems])
 
   async function refreshItems() {
     if (!hid || isOffline) return
     setRefreshing(true)
-    const supabase = createClient()
-    const { data } = await supabase
-      .from('shopping_items').select('*')
-      .eq('household_id', hid)
-      .order('category', { ascending: true, nullsFirst: false })
-      .order('created_at')
-    if (data) setItems(data)
+    await reloadItems()
     setRefreshing(false)
   }
 
@@ -222,10 +269,17 @@ export default function BoodschappenClient({ initialItems, householdId, role = '
     const checked = !item.checked
     setItems(prev => prev.map(i => i.id === item.id ? { ...i, checked } : i))
     if (!isOffline) {
-      await supabase.from('shopping_items').update({
+      holdLocal(item.id)
+      const { data: updated, error } = await supabase.from('shopping_items').update({
         checked,
         checked_at: checked ? new Date().toISOString() : null,
-      }).eq('id', item.id)
+      }).eq('id', item.id).select()
+      releaseLocal(item.id)
+      if (error || !updated?.length) {
+        setItems(prev => prev.map(i => i.id === item.id ? { ...i, checked: item.checked } : i))
+        toast(error ? `Afvinken mislukt: ${error.message}` : 'Afvinken mislukt — item niet gevonden', 'error')
+        return
+      }
       // Alleen eetbare boodschappen horen in de voorraadkast.
       const cat = shoppingCategoryFor(item)
       if (checked && !NON_PANTRY.has(cat)) {
@@ -246,9 +300,15 @@ export default function BoodschappenClient({ initialItems, householdId, role = '
 
   async function updateItemQuantity(item: ShoppingItem, quantity: number) {
     setItems(prev => prev.map(i => i.id === item.id ? { ...i, quantity } : i))
-    if (!isOffline) {
-      const supabase = createClient()
-      await supabase.from('shopping_items').update({ quantity }).eq('id', item.id)
+    if (isOffline) return
+    const supabase = createClient()
+    holdLocal(item.id)
+    const { data: updated, error } = await supabase
+      .from('shopping_items').update({ quantity }).eq('id', item.id).select()
+    releaseLocal(item.id)
+    if (error || !updated?.length) {
+      setItems(prev => prev.map(i => i.id === item.id ? { ...i, quantity: item.quantity } : i))
+      toast('Aantal opslaan mislukt — probeer het opnieuw', 'error')
     }
   }
 
