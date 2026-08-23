@@ -78,8 +78,14 @@ export type Maaltijd = {
   date: string
   /** Titel van het recept, voor de opsomming in het overzicht. */
   title: string
-  ingredients: { name: string }[]
+  /**
+   * `amount` en `unit` gebruikt de Schijf van Vijf zelf niet — die kijkt alleen
+   * naar de naam. Ze reizen mee zodat `voeding.ts` er wél mee kan rekenen.
+   */
+  ingredients: { name: string; amount?: string; unit?: string }[]
   cuisine?: string | null
+  /** Op hoeveel porties het recept is geschreven. */
+  servings?: number
 }
 
 export type WeekAnalyse = {

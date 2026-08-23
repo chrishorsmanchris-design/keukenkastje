@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { compressImage } from '@/lib/compress-image'
 import { useToast } from '@/components/Toast'
+import Voedingskaart from '@/components/Voedingskaart'
 import { isInPantry as matchesPantry, findInPantry } from '@/lib/pantry-match'
 import { categorizeShopping } from '@/lib/categorize'
 import type { Recipe, Ingredient } from '@/lib/types'
@@ -303,6 +304,12 @@ export default function ReceptDetail({ recipe }: { recipe: Recipe }) {
             })}
           </ul>
         </div>
+
+        {/* Voedingswaarde: per portie, dus onafhankelijk van de personen-knop hierboven */}
+        <Voedingskaart
+          ingredients={recipe.ingredients as Ingredient[]}
+          porties={recipe.servings}
+        />
 
         <button
           onClick={addToShoppingList}

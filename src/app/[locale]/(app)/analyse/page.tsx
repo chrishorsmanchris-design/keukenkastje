@@ -32,7 +32,7 @@ export default async function AnalysePage({ params }: { params: Promise<{ locale
   const [{ data: menuRows }, { data: bought }] = await Promise.all([
     supabase
       .from('week_menu')
-      .select('date, meal_type, recipe:recipes(title, ingredients, cuisine)')
+      .select('date, meal_type, recipe:recipes(title, ingredients, cuisine, servings)')
       .in('date', alleDates)
       .eq('household_id', householdId),
     // Afgevinkte boodschappen van deze week: het bewijs van wat er écht in huis
@@ -48,7 +48,12 @@ export default async function AnalysePage({ params }: { params: Promise<{ locale
   type Row = {
     date: string
     meal_type: string | null
-    recipe: { title: string; ingredients: unknown; cuisine: string | null } | null
+    recipe: {
+      title: string
+      ingredients: unknown
+      cuisine: string | null
+      servings: number | null
+    } | null
   }
 
   const alleMaaltijden: Maaltijd[] = ((menuRows ?? []) as unknown as Row[])
@@ -57,8 +62,10 @@ export default async function AnalysePage({ params }: { params: Promise<{ locale
       date: r.date,
       title: r.recipe!.title,
       cuisine: r.recipe!.cuisine,
+      servings: r.recipe!.servings ?? 2,
       ingredients: Array.isArray(r.recipe!.ingredients)
-        ? (r.recipe!.ingredients as { name: string }[]).filter(i => i?.name)
+        ? (r.recipe!.ingredients as { name: string; amount?: string; unit?: string }[])
+            .filter(i => i?.name)
         : [],
     }))
 

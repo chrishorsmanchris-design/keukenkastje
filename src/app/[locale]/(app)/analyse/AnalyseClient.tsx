@@ -3,6 +3,10 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { classify, type Bevinding, type Maaltijd, type Richting, type Vak, type WeekAnalyse } from '@/lib/schijf-van-vijf'
+import {
+  voedingVoorRecept, telOp, RI_DAG, AANDEEL_AVONDMAALTIJD,
+  type Voedingswaarde,
+} from '@/lib/voeding'
 
 const VAK_LABEL: Record<Vak, { naam: string; icon: string; kleur: string }> = {
   groente:  { naam: 'Groente',            icon: '🥦', kleur: 'bg-green-500'  },
@@ -55,6 +59,33 @@ export default function AnalyseClient({
   }
 
   const opeDagen = dates.filter(d => !maaltijdPerDag.has(d))
+
+  /**
+   * Voedingswaarde per dag: één portie per maaltijd, want de vraag is "wat eet
+   * ík die dag", niet "hoeveel gaat er de pan in". Alleen dagen waarvoor we
+   * genoeg ingrediënten konden meerekenen tellen mee — anders zou een recept
+   * met vage hoeveelheden er als een hongersnood uitzien.
+   */
+  const dagVoeding = dates.map(date => {
+    const dagMaaltijden = maaltijdPerDag.get(date) ?? []
+    const porties = dagMaaltijden.map(m => voedingVoorRecept(m.ingredients, m.servings ?? 2))
+    const bruikbaar = porties.filter(p => p.dekking >= 0.6)
+    return {
+      date,
+      titels: dagMaaltijden.map(m => m.title),
+      waarde: telOp(bruikbaar.map(p => p.perPortie)) as Voedingswaarde,
+      betrouwbaar: bruikbaar.length > 0 && bruikbaar.length === porties.length,
+      heeftMaaltijd: dagMaaltijden.length > 0,
+    }
+  })
+
+  const bruikbareDagen = dagVoeding.filter(d => d.betrouwbaar)
+  const gemiddeldeKcal = bruikbareDagen.length > 0
+    ? Math.round(telOp(bruikbareDagen.map(d => d.waarde)).kcal / bruikbareDagen.length)
+    : 0
+  const maxKcal = Math.max(1, ...dagVoeding.map(d => d.waarde.kcal))
+  // Richtwaarde voor een avondmaaltijd: 40% van een dag van 2000 kcal.
+  const richtKcal = Math.round(RI_DAG.kcal * AANDEEL_AVONDMAALTIJD)
 
   /**
    * Op dagen zonder weekmenu weten we niet wat er gegeten is. Wel wat er die
@@ -208,6 +239,81 @@ export default function AnalyseClient({
               indicatie, geen weegschaal.
             </p>
           </div>
+
+          {/* Per dag: hoe zwaar is de maaltijd, en waar zit dat in */}
+          {bruikbareDagen.length > 0 && (
+            <div className="bg-white border border-stone-200 rounded-2xl p-4">
+              <div className="flex items-baseline justify-between mb-1">
+                <p className="font-medium text-sm">Per dag</p>
+                <p className="text-xs text-stone-400">
+                  gemiddeld {gemiddeldeKcal} kcal per avond
+                </p>
+              </div>
+              <p className="text-stone-500 text-xs mb-4">
+                Eén portie per maaltijd. Een avondmaaltijd is ongeveer {richtKcal} kcal — de stippellijn.
+              </p>
+
+              <div className="space-y-2">
+                {dagVoeding.map(d => {
+                  const breedte = Math.round((d.waarde.kcal / maxKcal) * 100)
+                  const richtlijn = Math.round((richtKcal / maxKcal) * 100)
+                  return (
+                    <div key={d.date} className="flex items-center gap-2">
+                      <span className="text-[10px] text-stone-400 w-5 flex-shrink-0">
+                        {dagLabel(d.date)}
+                      </span>
+                      <div className="relative h-5 bg-stone-100 rounded-md overflow-hidden flex-1">
+                        {d.betrouwbaar && (
+                          <div
+                            className="h-full bg-orange-400 rounded-md"
+                            style={{ width: `${breedte}%` }}
+                          />
+                        )}
+                        <div
+                          className="absolute top-0 bottom-0 border-l-2 border-dashed border-stone-400/60"
+                          style={{ left: `${richtlijn}%` }}
+                          aria-hidden="true"
+                        />
+                      </div>
+                      <span className="text-[11px] text-stone-500 w-20 text-right flex-shrink-0">
+                        {d.betrouwbaar
+                          ? `${Math.round(d.waarde.kcal)} kcal`
+                          : d.heeftMaaltijd ? 'onbekend' : '—'}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* Wat er gemiddeld per avond binnenkomt, tegen de dagreferentie */}
+              <div className="grid grid-cols-4 gap-2 mt-4 pt-4 border-t border-stone-100 text-center">
+                {([
+                  { key: 'eiwit' as const,        label: 'eiwit'    },
+                  { key: 'koolhydraten' as const, label: 'koolh.'   },
+                  { key: 'vet' as const,          label: 'vet'      },
+                  { key: 'vezels' as const,       label: 'vezels'   },
+                ]).map(m => {
+                  const gem = telOp(bruikbareDagen.map(d => d.waarde))[m.key] / bruikbareDagen.length
+                  return (
+                    <div key={m.key}>
+                      <p className="text-lg font-semibold">{Math.round(gem)}<span className="text-xs font-normal text-stone-400">g</span></p>
+                      <p className="text-[11px] text-stone-500">{m.label}</p>
+                      <p className="text-[10px] text-stone-400">
+                        {Math.round((gem / RI_DAG[m.key]) * 100)}% RI
+                      </p>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {bruikbareDagen.length < analyse.bekendeDagen && (
+                <p className="text-xs text-stone-400 mt-3">
+                  {analyse.bekendeDagen - bruikbareDagen.length} van de {analyse.bekendeDagen} dagen
+                  konden we niet doorrekenen: daar staan te weinig hoeveelheden bij de ingrediënten.
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Bevindingen */}
           <div className="space-y-2">
