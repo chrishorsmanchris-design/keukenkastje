@@ -1,7 +1,8 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
-import { classify, type Bevinding, type Maaltijd, type Vak, type WeekAnalyse } from '@/lib/schijf-van-vijf'
+import { classify, type Bevinding, type Maaltijd, type Richting, type Vak, type WeekAnalyse } from '@/lib/schijf-van-vijf'
 
 const VAK_LABEL: Record<Vak, { naam: string; icon: string; kleur: string }> = {
   groente:  { naam: 'Groente',            icon: '🥦', kleur: 'bg-green-500'  },
@@ -23,23 +24,37 @@ function dagLabel(date: string): string {
   return DAG_LETTERS[new Date(date + 'T12:00:00').getDay()]
 }
 
-export default function AnalyseClient({
-  locale, analyse, bevindingen, maaltijden, gekocht, dates,
-}: {
-  locale: string
+export type Periode = {
   analyse: WeekAnalyse
   bevindingen: Bevinding[]
   maaltijden: Maaltijd[]
-  gekocht: { name: string }[]
   dates: string[]
+}
+
+export default function AnalyseClient({
+  locale, terug, vooruit, gekocht,
+}: {
+  locale: string
+  terug: Periode
+  vooruit: Periode
+  gekocht: { name: string }[]
 }) {
+  const [richting, setRichting] = useState<Richting>('terug')
+  const periode = richting === 'terug' ? terug : vooruit
+  const isVooruit = richting === 'vooruit'
+  const { analyse, bevindingen, maaltijden, dates } = periode
+
+  const vandaag = new Date().toISOString().split('T')[0]
   const totaalIngredienten = HOOFDVAKKEN.reduce((sum, v) => sum + analyse.vakken[v], 0)
+
   const maaltijdPerDag = new Map<string, Maaltijd[]>()
   for (const m of maaltijden) {
     const lijst = maaltijdPerDag.get(m.date) ?? []
     lijst.push(m)
     maaltijdPerDag.set(m.date, lijst)
   }
+
+  const opeDagen = dates.filter(d => !maaltijdPerDag.has(d))
 
   /**
    * Op dagen zonder weekmenu weten we niet wat er gegeten is. Wel wat er die
@@ -57,14 +72,38 @@ export default function AnalyseClient({
       <div>
         <h1 className="text-2xl font-semibold">Weekanalyse</h1>
         <p className="text-stone-500 text-sm mt-1">
-          De afgelopen 7 dagen, langs de Schijf van Vijf gelegd.
+          {isVooruit
+            ? 'De komende 7 dagen, langs de Schijf van Vijf gelegd — nu nog bij te sturen.'
+            : 'De afgelopen 7 dagen, langs de Schijf van Vijf gelegd.'}
         </p>
+      </div>
+
+      {/* Terug- of vooruitkijken */}
+      <div role="tablist" aria-label="Periode" className="flex bg-stone-100 rounded-2xl p-1">
+        {([
+          { key: 'terug' as const,   label: 'Afgelopen week' },
+          { key: 'vooruit' as const, label: 'Komende week'   },
+        ]).map(tab => (
+          <button
+            key={tab.key}
+            role="tab"
+            aria-selected={richting === tab.key}
+            onClick={() => setRichting(tab.key)}
+            className={`flex-1 text-sm font-medium py-2 rounded-xl transition-colors ${
+              richting === tab.key ? 'bg-white text-stone-800 shadow-sm' : 'text-stone-500'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
       {/* Dekking: eerlijk zijn over hoeveel we eigenlijk weten */}
       <div className="bg-white border border-stone-200 rounded-2xl p-4">
         <div className="flex items-center justify-between mb-3">
-          <p className="font-medium text-sm">Wat we van deze week weten</p>
+          <p className="font-medium text-sm">
+            {isVooruit ? 'Wat er al gepland staat' : 'Wat we van deze week weten'}
+          </p>
           <span className="text-xs text-stone-400">
             {analyse.bekendeDagen} van {analyse.totaalDagen} dagen
           </span>
@@ -72,16 +111,21 @@ export default function AnalyseClient({
         <div className="flex justify-between">
           {dates.map(date => {
             const heeft = maaltijdPerDag.has(date)
+            const isVandaag = date === vandaag
             return (
               <div key={date} className="flex flex-col items-center gap-1">
-                <span className="text-[10px] text-stone-400">{dagLabel(date)}</span>
+                <span className={`text-[10px] ${isVandaag ? 'text-orange-500 font-medium' : 'text-stone-400'}`}>
+                  {dagLabel(date)}
+                </span>
                 <div
                   className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
-                    heeft ? 'bg-green-500 text-white' : 'bg-stone-200 text-stone-400'
-                  }`}
-                  title={heeft ? maaltijdPerDag.get(date)!.map(m => m.title).join(', ') : 'Niets vastgelegd'}
+                    heeft ? 'bg-green-500 text-white'
+                      : isVooruit ? 'border-2 border-dashed border-stone-300 bg-white text-stone-400'
+                      : 'bg-stone-200 text-stone-400'
+                  } ${isVandaag ? 'ring-2 ring-orange-300 ring-offset-1' : ''}`}
+                  title={heeft ? maaltijdPerDag.get(date)!.map(m => m.title).join(', ') : 'Nog niets gepland'}
                 >
-                  {heeft ? '✓' : '?'}
+                  {heeft ? '✓' : isVooruit ? '' : '?'}
                 </div>
               </div>
             )
@@ -89,21 +133,39 @@ export default function AnalyseClient({
         </div>
         {dekking < 1 && (
           <p className="text-xs text-stone-500 mt-3">
-            Op de dagen met een vraagteken staat niets in het weekmenu, dus daar kunnen we niets over zeggen.{' '}
-            <Link href={`/${locale}/weekmenu`} className="text-orange-500 underline">
-              Vul je weekmenu aan
-            </Link>{' '}
-            voor een completer beeld.
+            {isVooruit ? (
+              <>
+                Nog {opeDagen.length} {opeDagen.length === 1 ? 'dag' : 'dagen'} open:{' '}
+                {opeDagen.map(dagLabel).join(', ')}.{' '}
+                <Link href={`/${locale}/weekmenu`} className="text-orange-500 underline">
+                  Vul je weekmenu aan
+                </Link>{' '}
+                en zie hier meteen wat het met je week doet.
+              </>
+            ) : (
+              <>
+                Op de dagen met een vraagteken staat niets in het weekmenu, dus daar kunnen we niets over
+                zeggen.{' '}
+                <Link href={`/${locale}/weekmenu`} className="text-orange-500 underline">
+                  Vul je weekmenu aan
+                </Link>{' '}
+                voor een completer beeld.
+              </>
+            )}
           </p>
         )}
       </div>
 
       {analyse.bekendeDagen === 0 ? (
         <div className="bg-white border border-dashed border-stone-300 rounded-2xl p-6 text-center">
-          <p className="text-3xl">📊</p>
-          <p className="font-medium text-sm mt-2">Nog niets te analyseren</p>
+          <p className="text-3xl">{isVooruit ? '🗓️' : '📊'}</p>
+          <p className="font-medium text-sm mt-2">
+            {isVooruit ? 'Nog niets gepland' : 'Nog niets te analyseren'}
+          </p>
           <p className="text-stone-500 text-xs mt-1">
-            Zodra je maaltijden in het weekmenu zet, zie je hier of je week gevarieerd is.
+            {isVooruit
+              ? 'Zet maaltijden in het weekmenu, dan zie je hier meteen of je week gevarieerd wordt.'
+              : 'Zodra je maaltijden in het weekmenu zet, zie je hier of je week gevarieerd is.'}
           </p>
           <Link
             href={`/${locale}/weekmenu`}
@@ -142,7 +204,8 @@ export default function AnalyseClient({
               })}
             </div>
             <p className="text-xs text-stone-400 mt-3">
-              Geteld per ingrediënt in de gerechten van deze week — een indicatie, geen weegschaal.
+              Geteld per ingrediënt in de gerechten van {isVooruit ? 'komende' : 'deze'} week — een
+              indicatie, geen weegschaal.
             </p>
           </div>
 
@@ -167,6 +230,27 @@ export default function AnalyseClient({
               </div>
             ))}
           </div>
+
+          {/* Bij vooruitkijken: de open dagen zijn de knop, niet een klacht */}
+          {isVooruit && opeDagen.length > 0 && (
+            <Link
+              href={`/${locale}/weekmenu`}
+              className="flex items-center gap-3 bg-orange-50 border border-orange-200 rounded-2xl p-3 hover:brightness-95 transition-all"
+            >
+              <span className="text-xl" aria-hidden="true">🗓️</span>
+              <div className="min-w-0 flex-1">
+                <p className="font-medium text-sm">
+                  {opeDagen.length === 1
+                    ? 'Er is nog één avond vrij'
+                    : `Er zijn nog ${opeDagen.length} avonden vrij`}
+                </p>
+                <p className="text-stone-500 text-xs">
+                  Vul ze in met wat er nog ontbreekt en de analyse loopt meteen mee.
+                </p>
+              </div>
+              <span className="text-stone-400 text-sm" aria-hidden="true">→</span>
+            </Link>
+          )}
 
           {/* Variatie */}
           <div className="bg-white border border-stone-200 rounded-2xl p-4">
@@ -195,11 +279,35 @@ export default function AnalyseClient({
               </div>
             )}
           </div>
+
+          {/* Vooruit: kwam iets van vorige week ook al voorbij? */}
+          {isVooruit && (() => {
+            const vorige = new Set(terug.maaltijden.map(m => m.title))
+            const opnieuw = [...new Set(
+              vooruit.maaltijden.filter(m => vorige.has(m.title)).map(m => m.title),
+            )]
+            if (opnieuw.length === 0) return null
+            return (
+              <div className="bg-stone-50 border border-stone-200 rounded-2xl p-4">
+                <p className="font-medium text-sm">Ook vorige week al gegeten</p>
+                <p className="text-stone-500 text-xs mt-0.5">
+                  Niet per se erg — handig om te weten als je afwisseling zoekt.
+                </p>
+                <div className="flex flex-wrap gap-1.5 mt-3">
+                  {opnieuw.map(t => (
+                    <span key={t} className="text-xs bg-white border border-stone-200 text-stone-600 rounded-full px-2.5 py-1">
+                      {t}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
         </>
       )}
 
-      {/* Boodschappen als aanvullend signaal */}
-      {gekochteGroenteFruit.length > 0 && (
+      {/* Boodschappen als aanvullend signaal — alleen bij terugkijken */}
+      {!isVooruit && gekochteGroenteFruit.length > 0 && (
         <div className="bg-white border border-stone-200 rounded-2xl p-4">
           <p className="font-medium text-sm">Ook gekocht deze week</p>
           <p className="text-stone-500 text-xs mt-0.5">

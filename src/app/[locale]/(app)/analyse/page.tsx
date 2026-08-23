@@ -4,19 +4,25 @@ import AnalyseClient from './AnalyseClient'
 
 export const dynamic = 'force-dynamic'
 
-/** De afgelopen 7 dagen, inclusief vandaag. */
-function afgelopenWeek(): string[] {
-  return Array.from({ length: 7 }, (_, i) => {
+function datumReeks(vanOffset: number, aantal: number): string[] {
+  return Array.from({ length: aantal }, (_, i) => {
     const d = new Date()
-    d.setDate(d.getDate() - i)
+    d.setDate(d.getDate() + vanOffset + i)
     return d.toISOString().split('T')[0]
-  }).reverse()
+  })
 }
 
 export default async function AnalysePage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params
   const supabase = await createClient()
-  const dates = afgelopenWeek()
+
+  // Terugkijken: de zes dagen vóór vandaag plus vandaag.
+  const terugDates = datumReeks(-6, 7)
+  // Vooruitkijken: vandaag plus de zes dagen erna. Vandaag zit bewust in
+  // allebei — het is zowel de dag die net (bijna) voorbij is als de eerste dag
+  // die je nog kunt veranderen.
+  const vooruitDates = datumReeks(0, 7)
+  const alleDates = [...new Set([...terugDates, ...vooruitDates])]
 
   const { data: { user } } = await supabase.auth.getUser()
   const { data: profile } = await supabase
@@ -27,7 +33,7 @@ export default async function AnalysePage({ params }: { params: Promise<{ locale
     supabase
       .from('week_menu')
       .select('date, meal_type, recipe:recipes(title, ingredients, cuisine)')
-      .in('date', dates)
+      .in('date', alleDates)
       .eq('household_id', householdId),
     // Afgevinkte boodschappen van deze week: het bewijs van wat er écht in huis
     // kwam op dagen waarop niets gepland stond.
@@ -36,7 +42,7 @@ export default async function AnalysePage({ params }: { params: Promise<{ locale
       .select('name, checked_at')
       .eq('household_id', householdId)
       .eq('checked', true)
-      .gte('checked_at', `${dates[0]}T00:00:00`),
+      .gte('checked_at', `${terugDates[0]}T00:00:00`),
   ])
 
   type Row = {
@@ -45,7 +51,7 @@ export default async function AnalysePage({ params }: { params: Promise<{ locale
     recipe: { title: string; ingredients: unknown; cuisine: string | null } | null
   }
 
-  const maaltijden: Maaltijd[] = ((menuRows ?? []) as unknown as Row[])
+  const alleMaaltijden: Maaltijd[] = ((menuRows ?? []) as unknown as Row[])
     .filter(r => r.recipe)
     .map(r => ({
       date: r.date,
@@ -56,19 +62,33 @@ export default async function AnalysePage({ params }: { params: Promise<{ locale
         : [],
     }))
 
-  const analyse = analyseerWeek(maaltijden, dates.length)
-  const punten = bevindingen(analyse)
+  const binnen = (dates: string[]) => {
+    const set = new Set(dates)
+    return alleMaaltijden.filter(m => set.has(m.date))
+  }
 
-  const gekocht = (bought ?? []).map(b => ({ name: b.name as string }))
+  const terugMaaltijden = binnen(terugDates)
+  const vooruitMaaltijden = binnen(vooruitDates)
+
+  const terugAnalyse = analyseerWeek(terugMaaltijden, terugDates.length)
+  const vooruitAnalyse = analyseerWeek(vooruitMaaltijden, vooruitDates.length)
 
   return (
     <AnalyseClient
       locale={locale}
-      analyse={analyse}
-      bevindingen={punten}
-      maaltijden={maaltijden}
-      gekocht={gekocht}
-      dates={dates}
+      terug={{
+        analyse: terugAnalyse,
+        bevindingen: bevindingen(terugAnalyse, 'terug'),
+        maaltijden: terugMaaltijden,
+        dates: terugDates,
+      }}
+      vooruit={{
+        analyse: vooruitAnalyse,
+        bevindingen: bevindingen(vooruitAnalyse, 'vooruit'),
+        maaltijden: vooruitMaaltijden,
+        dates: vooruitDates,
+      }}
+      gekocht={(bought ?? []).map(b => ({ name: b.name as string }))}
     />
   )
 }

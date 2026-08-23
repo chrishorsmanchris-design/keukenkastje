@@ -178,54 +178,113 @@ export type Bevinding = {
 }
 
 /**
+ * Kijken we terug op wat er gegeten is, of vooruit op wat er gepland staat?
+ *
+ * De cijfers zijn identiek, maar de toon verschilt: terugkijkend is een
+ * ontbrekend visgerecht een constatering, vooruitkijkend is het nog iets dat
+ * je kunt veranderen.
+ */
+export type Richting = 'terug' | 'vooruit'
+
+/**
  * Vertaalt de cijfers naar begrijpelijke bevindingen.
  *
  * Bewust mild geformuleerd: dit is een hulpmiddel om patronen te zien, geen
  * beoordeling. Bij weinig gegevens zeggen we dat, in plaats van te doen alsof
  * we het weten.
  */
-export function bevindingen(a: WeekAnalyse): Bevinding[] {
+export function bevindingen(a: WeekAnalyse, richting: Richting = 'terug'): Bevinding[] {
   const uit: Bevinding[] = []
   if (a.bekendeDagen === 0) return uit
 
+  const vooruit = richting === 'vooruit'
+  // "de bekende dagen" versus "de geplande dagen" — verder is de rekensom gelijk.
+  const dagWoord = vooruit ? 'geplande' : 'bekende'
+
   const groenteAandeel = a.groenteDagen / a.bekendeDagen
   if (groenteAandeel >= 0.85) {
-    uit.push({ status: 'goed', titel: 'Elke dag groente', uitleg: `Op ${a.groenteDagen} van de ${a.bekendeDagen} bekende dagen stond er groente op tafel.` })
+    uit.push({
+      status: 'goed',
+      titel: vooruit ? 'Elke dag groente gepland' : 'Elke dag groente',
+      uitleg: vooruit
+        ? `Op ${a.groenteDagen} van de ${a.bekendeDagen} geplande dagen staat er groente op het menu.`
+        : `Op ${a.groenteDagen} van de ${a.bekendeDagen} bekende dagen stond er groente op tafel.`,
+    })
   } else if (groenteAandeel >= 0.5) {
-    uit.push({ status: 'let-op', titel: 'Groente kan vaker', uitleg: `Groente op ${a.groenteDagen} van de ${a.bekendeDagen} dagen. Het advies is elke dag 250 gram.` })
+    uit.push({
+      status: 'let-op',
+      titel: 'Groente kan vaker',
+      uitleg: `Groente op ${a.groenteDagen} van de ${a.bekendeDagen} ${dagWoord} dagen. Het advies is elke dag 250 gram.`,
+    })
   } else {
-    uit.push({ status: 'let-op', titel: 'Weinig groente', uitleg: `Maar ${a.groenteDagen} van de ${a.bekendeDagen} dagen met groente. Een handvol extra bij het avondeten is zo gedaan.` })
+    uit.push({
+      status: 'let-op',
+      titel: 'Weinig groente',
+      uitleg: vooruit
+        ? `Maar ${a.groenteDagen} van de ${a.bekendeDagen} geplande dagen met groente. Een extra groente bij een gerecht is zo bedacht.`
+        : `Maar ${a.groenteDagen} van de ${a.bekendeDagen} dagen met groente. Een handvol extra bij het avondeten is zo gedaan.`,
+    })
   }
 
   if (a.visMaaltijden >= 1) {
-    uit.push({ status: 'goed', titel: 'Vis gegeten', uitleg: `${a.visMaaltijden}× vis deze week. Eén keer per week is het advies.` })
+    uit.push({
+      status: 'goed',
+      titel: vooruit ? 'Vis staat gepland' : 'Vis gegeten',
+      uitleg: `${a.visMaaltijden}× vis ${vooruit ? 'komende week' : 'deze week'}. Eén keer per week is het advies.`,
+    })
   } else {
-    uit.push({ status: 'let-op', titel: 'Geen vis deze week', uitleg: 'Eén keer per week vis wordt aangeraden, bij voorkeur vette vis zoals zalm of makreel.' })
+    uit.push({
+      status: 'let-op',
+      titel: vooruit ? 'Nog geen vis gepland' : 'Geen vis deze week',
+      uitleg: vooruit
+        ? 'Eén keer per week vis wordt aangeraden. Plan er nog een visgerecht bij, bij voorkeur vette vis zoals zalm of makreel.'
+        : 'Eén keer per week vis wordt aangeraden, bij voorkeur vette vis zoals zalm of makreel.',
+    })
   }
 
   if (a.peulvruchtMaaltijden >= 1) {
-    uit.push({ status: 'goed', titel: 'Peulvruchten op het menu', uitleg: `${a.peulvruchtMaaltijden}× peulvruchten, zoals linzen of kikkererwten.` })
+    uit.push({
+      status: 'goed',
+      titel: 'Peulvruchten op het menu',
+      uitleg: `${a.peulvruchtMaaltijden}× peulvruchten, zoals linzen of kikkererwten.`,
+    })
   } else {
-    uit.push({ status: 'let-op', titel: 'Geen peulvruchten', uitleg: 'Wekelijks peulvruchten is het advies — goedkoop, vezelrijk en makkelijk te verwerken.' })
+    uit.push({
+      status: 'let-op',
+      titel: vooruit ? 'Nog geen peulvruchten gepland' : 'Geen peulvruchten',
+      uitleg: 'Wekelijks peulvruchten is het advies — goedkoop, vezelrijk en makkelijk te verwerken.',
+    })
   }
 
   if (a.vleesloosDagen >= 2) {
-    uit.push({ status: 'goed', titel: `${a.vleesloosDagen} dagen zonder vlees of vis`, uitleg: 'Mooie afwisseling tussen dierlijke en plantaardige eiwitten.' })
+    uit.push({
+      status: 'goed',
+      titel: `${a.vleesloosDagen} dagen zonder vlees of vis`,
+      uitleg: 'Mooie afwisseling tussen dierlijke en plantaardige eiwitten.',
+    })
   }
 
   if (a.roodvleesMaaltijden + a.bewerktvleesMaaltijden > 3) {
     uit.push({
       status: 'let-op',
-      titel: 'Vaak rood of bewerkt vlees',
+      titel: vooruit ? 'Vaak rood of bewerkt vlees gepland' : 'Vaak rood of bewerkt vlees',
       uitleg: `${a.roodvleesMaaltijden}× rood vlees en ${a.bewerktvleesMaaltijden}× bewerkt vlees. Het advies is maximaal 3 keer per week rood vlees.`,
     })
   }
 
   if (a.herhaald.length === 0 && a.bekendeDagen >= 3) {
-    uit.push({ status: 'goed', titel: 'Veel variatie', uitleg: `${a.uniekeRecepten} verschillende gerechten, geen enkele herhaling.` })
+    uit.push({
+      status: 'goed',
+      titel: 'Veel variatie',
+      uitleg: `${a.uniekeRecepten} verschillende gerechten, geen enkele herhaling.`,
+    })
   } else if (a.herhaald.length > 0) {
     const top = a.herhaald[0]
-    uit.push({ status: 'neutraal', titel: 'Herhaling in het menu', uitleg: `${top.title} stond ${top.aantal}× op het menu.` })
+    uit.push({
+      status: 'neutraal',
+      titel: 'Herhaling in het menu',
+      uitleg: `${top.title} staat ${top.aantal}× op het menu.`,
+    })
   }
 
   return uit

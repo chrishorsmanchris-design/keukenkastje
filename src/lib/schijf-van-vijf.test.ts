@@ -77,3 +77,30 @@ test('meldt ontbrekende vis en peulvruchten als aandachtspunt', () => {
   assert.ok(titels.includes('Geen vis deze week'))
   assert.ok(titels.includes('Geen peulvruchten'))
 })
+
+test('formuleert vooruitkijkend als iets dat nog te plannen is', () => {
+  const a = analyseerWeek([
+    { date: '2026-08-24', title: 'Biefstuk', ingredients: [{ name: 'biefstuk' }, { name: 'aardappelen' }] },
+  ], 7)
+
+  const terug = bevindingen(a, 'terug').map(b => b.titel)
+  const vooruit = bevindingen(a, 'vooruit').map(b => b.titel)
+
+  // Zelfde constatering, andere toon.
+  assert.ok(terug.includes('Geen vis deze week'))
+  assert.ok(vooruit.includes('Nog geen vis gepland'))
+  assert.ok(vooruit.includes('Nog geen peulvruchten gepland'))
+
+  // De cijfers zelf veranderen niet van richting.
+  assert.equal(bevindingen(a, 'terug').length, bevindingen(a, 'vooruit').length)
+})
+
+test('vooruit noemt geplande groente ook echt gepland', () => {
+  const a = analyseerWeek([
+    { date: '2026-08-24', title: 'Roerbak', ingredients: [{ name: 'broccoli' }, { name: 'zalmfilet' }] },
+    { date: '2026-08-25', title: 'Linzensoep', ingredients: [{ name: 'linzen' }, { name: 'wortel' }] },
+  ], 7)
+  const b = bevindingen(a, 'vooruit')
+  assert.ok(b.some(x => x.titel === 'Elke dag groente gepland'))
+  assert.ok(b.some(x => x.titel === 'Vis staat gepland'))
+})
